@@ -16,7 +16,7 @@ import type { Department, MenuItem, Order, OrderItem } from "@/types";
 
 const S = {
   app: {
-    maxWidth: 420, margin: "0 auto", minHeight: "100dvh",
+    minHeight: "100dvh",
     background: "#fff", fontFamily: "Sarabun, sans-serif",
     display: "flex", flexDirection: "column" as const,
   },
