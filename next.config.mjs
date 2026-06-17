@@ -1,18 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  async headers() {
-    return [
-      {
-        source: "/(.*)",
-        headers: [
-          {
-            key: "Viewport",
-            value: "width=device-width, initial-scale=1, maximum-scale=1",
-          },
-        ],
-      },
-    ];
-  },
+  allowedDevOrigins: ['192.168.2.71', 'localhost'],
 };
 
 export default nextConfig;

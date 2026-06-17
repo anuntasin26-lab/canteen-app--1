@@ -1,317 +1,332 @@
 "use client";
-
 // ─── app/kitchen/page.tsx ─────────────────────────────────
-//  fix 1: ลบ `tick` state ที่ไม่ได้ใช้
-//  fix 2: ลบ `prevNewCount` ref ที่ไม่ได้ใช้
-//  fix 3: แก้ปุ่ม delete ซ้ำ 2 ปุ่มในคอลัมน์ "done"
-// ─────────────────────────────────────────────────────────
+// PIN lock + Kanban + ประวัติรายการ
 
 import { useEffect, useRef, useState } from "react";
 import {
-  getTodayOrders,
-  updateOrderStatus,
-  deleteOrder,
-  subscribeToOrders,
-  supabase,
+  getTodayOrders, getOrderHistory,
+  updateOrderStatus, deleteOrder,
+  subscribeToOrders, supabase,
 } from "@/lib/supabase";
 import type { Order, OrderStatus } from "@/types";
 
-const fmtElapsed = (createdAt: string, startedAt?: string | null) => {
-  const base = startedAt ? new Date(startedAt) : new Date(createdAt);
-  const sec  = Math.floor((Date.now() - base.getTime()) / 1000);
+// ── PIN ──────────────────────────────────────────────────
+const KITCHEN_PIN = process.env.NEXT_PUBLIC_KITCHEN_PIN ?? "1234"; // เปลี่ยนได้ตามต้องการ
+
+// ── helpers ───────────────────────────────────────────────
+const fmt = (s: string, ref?: string | null) => {
+  const base = ref ? new Date(ref) : new Date(s);
+  const sec = Math.floor((Date.now() - base.getTime()) / 1000);
   if (sec < 60) return `${sec}วิ`;
   return `${Math.floor(sec / 60)}น.${String(sec % 60).padStart(2, "0")}วิ`;
 };
 
-const isUrgent = (o: Order) => {
-  const sec = Math.floor((Date.now() - new Date(o.created_at).getTime()) / 1000);
-  return o.status === "new" && sec > 180;
-};
+const fmtDate = (s: string) =>
+  new Date(s).toLocaleString("th-TH", {
+    day: "numeric", month: "short",
+    hour: "2-digit", minute: "2-digit",
+  });
 
 const isWarn = (o: Order) => {
   const base = o.started_at ?? o.created_at;
-  const sec  = Math.floor((Date.now() - new Date(base).getTime()) / 1000);
+  const sec = Math.floor((Date.now() - new Date(base).getTime()) / 1000);
   return (o.status === "new" && sec > 120) || (o.status === "cooking" && sec > 600);
 };
 
-// ── column config ─────────────────────────────────────────
-type ColConfig = {
-  status:     OrderStatus;
-  label:      string;
-  icon:       string;
-  hdrBg:      string;
-  hdrColor:   string;
-  cntBg:      string;
-  btnLabel:   string;
-  btnBg:      string;
-  nextStatus: "cooking" | "done" | null;
+const C = {
+  green: "#3B6B0F", greenL: "#EBF3DC", greenB: "#B5D47A",
+  amber: "#C97A14", amberL: "#FEF3DC",
+  red: "#C0392B", redL: "#FDECEA",
+  text: "#1C1A17", muted: "#7A7570", border: "#E2DDD6", bg: "#F5F3EE",
 };
 
-const COLS: ColConfig[] = [
-  { status: "new",     label: "ออร์เดอร์ใหม่", icon: "🔔", hdrBg: "#FDECEA", hdrColor: "#7C1D13", cntBg: "#F5B4AE", btnLabel: "รับออร์เดอร์", btnBg: "#C0392B", nextStatus: "cooking" },
-  { status: "cooking", label: "กำลังปรุง",      icon: "👨‍🍳", hdrBg: "#FEF3DC", hdrColor: "#7C4A08", cntBg: "#F5D49A", btnLabel: "เสร็จแล้ว",   btnBg: "#C97A14", nextStatus: "done"    },
-  { status: "done",    label: "พร้อมเสิร์ฟ",    icon: "✅", hdrBg: "#EBF3DC", hdrColor: "#3B6B0F", cntBg: "#B5D47A", btnLabel: "ล้างรายการ",  btnBg: "#3B6B0F", nextStatus: null      },
+const COLS = [
+  { status: "new" as OrderStatus,     label: "ใหม่",        icon: "🔔", hBg: C.redL,   hC: "#7C1D13", cBg: "#F5B4AE", bLabel: "รับออร์เดอร์", bBg: C.red,   next: "cooking" as const },
+  { status: "cooking" as OrderStatus, label: "กำลังปรุง",   icon: "👨‍🍳", hBg: C.amberL, hC: "#7C4A08", cBg: "#F5D49A", bLabel: "เสร็จแล้ว",   bBg: C.amber, next: "done" as const },
+  { status: "done" as OrderStatus,    label: "เสิร์ฟแล้ว",  icon: "✅", hBg: C.greenL, hC: C.green,  cBg: C.greenB, bLabel: "ล้างรายการ",  bBg: C.green, next: null },
 ];
 
 // ─────────────────────────────────────────────────────────
-
 export default function KitchenPage() {
+  const [pin,     setPin]     = useState("");
+  const [unlocked,setUnlocked]= useState(false);
+  const [pinError,setPinError]= useState(false);
+  const [tab,     setTab]     = useState<"kanban"|"history">("kanban");
   const [orders,  setOrders]  = useState<Order[]>([]);
+  const [history, setHistory] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast,   setToast]   = useState(false);
+  const [hdays,   setHdays]   = useState(7);
   const audioRef = useRef<AudioContext | null>(null);
 
-  // โหลดออร์เดอร์วันนี้
-  useEffect(() => {
-    getTodayOrders()
-      .then((data) => setOrders(data as Order[]))
-      .finally(() => setLoading(false));
-  }, []);
+  // ── PIN check ─────────────────────────────────────────
+  const handlePin = (p: string) => {
+    setPin(p);
+    if (p.length === 4) {
+      if (p === KITCHEN_PIN) { setUnlocked(true); setPinError(false); }
+      else { setPinError(true); setTimeout(() => { setPin(""); setPinError(false); }, 800); }
+    }
+  };
 
-  // Realtime subscription
+  // ── load orders ───────────────────────────────────────
   useEffect(() => {
-    const channel = subscribeToOrders((payload) => {
+    if (!unlocked) return;
+    getTodayOrders()
+      .then(d => setOrders(d as Order[]))
+      .finally(() => setLoading(false));
+  }, [unlocked]);
+
+  // ── load history ──────────────────────────────────────
+  useEffect(() => {
+    if (!unlocked || tab !== "history") return;
+    getOrderHistory(hdays).then(d => setHistory(d as Order[]));
+  }, [unlocked, tab, hdays]);
+
+  // ── realtime ──────────────────────────────────────────
+  useEffect(() => {
+    if (!unlocked) return;
+    const ch = subscribeToOrders((payload) => {
       if (payload.eventType === "INSERT") {
-        // ดึง departments join มาด้วย เพราะ realtime payload ไม่มี join
-        supabase
-          .from("orders")
-          .select("*, departments(id, name)")
-          .eq("id", payload.new.id)
-          .single()
+        supabase.from("orders").select("*, departments(id,name)")
+          .eq("id", payload.new.id).single()
           .then(({ data }) => {
             if (data) {
-              setOrders((prev) => [data as Order, ...prev]);
-              setToast(true);
-              setTimeout(() => setToast(false), 3000);
+              setOrders(p => [data as Order, ...p]);
+              setToast(true); setTimeout(() => setToast(false), 3000);
               playBeep();
             }
           });
       }
-      if (payload.eventType === "UPDATE") {
-        setOrders((prev) =>
-          prev.map((o) => o.id === payload.new.id ? { ...o, ...payload.new } : o)
-        );
-      }
-      if (payload.eventType === "DELETE") {
-        setOrders((prev) => prev.filter((o) => o.id !== payload.old.id));
-      }
+      if (payload.eventType === "UPDATE")
+        setOrders(p => p.map(o => o.id === payload.new.id ? { ...o, ...payload.new } : o));
+      if (payload.eventType === "DELETE")
+        setOrders(p => p.filter(o => o.id !== payload.old.id));
     });
-    return () => { supabase.removeChannel(channel); };
-  }, []);
+    return () => { supabase.removeChannel(ch); };
+  }, [unlocked]);
 
-  // Timer: re-render ทุก 1 วินาที เพื่ออัปเดตเวลาบนการ์ด
+  // ── timer tick ────────────────────────────────────────
   useEffect(() => {
-    const t = setInterval(() => setOrders((prev) => [...prev]), 1000);
+    const t = setInterval(() => setOrders(p => [...p]), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // เสียงแจ้งเตือน (Web Audio API)
   const playBeep = () => {
     try {
       if (!audioRef.current) audioRef.current = new AudioContext();
-      const ctx  = audioRef.current;
-      const osc  = ctx.createOscillator();
+      const ctx = audioRef.current;
+      const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
+      osc.connect(gain); gain.connect(ctx.destination);
       osc.frequency.value = 880;
       gain.gain.setValueAtTime(0.3, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.4);
-    } catch { /* ไม่ทำอะไรถ้า AudioContext ไม่พร้อม */ }
+      osc.start(); osc.stop(ctx.currentTime + 0.4);
+    } catch { }
   };
 
-  // เลื่อน status: new→cooking, cooking→done
   const handleMove = async (id: number, status: "cooking" | "done") => {
     try {
       await updateOrderStatus(id, status);
-      // optimistic update ทันทีก่อน realtime ตอบกลับ
-      setOrders((prev) =>
-        prev.map((o) =>
-          o.id === id
-            ? {
-                ...o,
-                status,
-                started_at:   status === "cooking" ? new Date().toISOString() : o.started_at,
-                completed_at: status === "done"    ? new Date().toISOString() : o.completed_at,
-              }
-            : o
-        )
-      );
-    } catch {
-      alert("เกิดข้อผิดพลาด กรุณาลองใหม่");
-    }
+      setOrders(p => p.map(o => o.id === id ? {
+        ...o, status,
+        started_at:   status === "cooking" ? new Date().toISOString() : o.started_at,
+        completed_at: status === "done"    ? new Date().toISOString() : o.completed_at,
+      } : o));
+    } catch { alert("เกิดข้อผิดพลาด"); }
   };
 
-  // ลบออร์เดอร์ (ใช้กับทุกคอลัมน์ โดยมีปุ่ม 🗑 เสมอ)
   const handleDelete = async (id: number) => {
     try {
       await deleteOrder(id);
-      setOrders((prev) => prev.filter((o) => o.id !== id));
-    } catch {
-      alert("เกิดข้อผิดพลาด กรุณาลองใหม่");
-    }
+      setOrders(p => p.filter(o => o.id !== id));
+    } catch { alert("เกิดข้อผิดพลาด"); }
   };
 
   const total   = orders.length;
-  const pending = orders.filter((o) => o.status !== "done").length;
+  const pending = orders.filter(o => o.status !== "done").length;
   const revenue = orders.reduce((s, o) => s + o.total, 0);
 
-  if (loading) return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100dvh", fontFamily: "Sarabun, sans-serif", color: "#7A7570" }}>
-      กำลังโหลด...
+  // ── PIN SCREEN ────────────────────────────────────────
+  if (!unlocked) return (
+    <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: C.bg, fontFamily: "Sarabun, sans-serif", padding: 24 }}>
+      <div style={{ fontSize: 48, marginBottom: 12 }}>🍳</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color: C.text, marginBottom: 4 }}>หน้าครัว</div>
+      <div style={{ fontSize: 13, color: C.muted, marginBottom: 32 }}>ใส่ PIN เพื่อเข้าใช้งาน</div>
+
+      {/* PIN dots */}
+      <div style={{ display: "flex", gap: 16, marginBottom: 32 }}>
+        {[0,1,2,3].map(i => (
+          <div key={i} style={{ width: 18, height: 18, borderRadius: "50%", background: pin.length > i ? (pinError ? C.red : C.green) : C.border, transition: "background .15s" }} />
+        ))}
+      </div>
+
+      {/* Numpad */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, maxWidth: 240, width: "100%" }}>
+        {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((n, i) => (
+          <button key={i}
+            onClick={() => {
+              if (n === "⌫") setPin(p => p.slice(0,-1));
+              else if (n !== "") handlePin(pin + String(n));
+            }}
+            style={{ padding: "18px 0", border: `1px solid ${C.border}`, borderRadius: 12, background: n === "" ? "transparent" : "#fff", fontSize: 20, fontWeight: 600, cursor: n === "" ? "default" : "pointer", color: C.text, fontFamily: "Sarabun, sans-serif" }}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+      {pinError && <div style={{ color: C.red, fontSize: 13, marginTop: 16, fontWeight: 600 }}>PIN ไม่ถูกต้อง</div>}
     </div>
   );
 
+  // ── KITCHEN MAIN ──────────────────────────────────────
   return (
-    <div style={{ fontFamily: "Sarabun, sans-serif", background: "#F5F3EE", minHeight: "100dvh" }}>
-
-      {/* Toast แจ้งเตือนออร์เดอร์ใหม่ */}
+    <div style={{ minHeight: "100dvh", background: C.bg, fontFamily: "Sarabun, sans-serif" }}>
       {toast && (
-        <div style={{ position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)", background: "#3B6B0F", color: "#fff", padding: "10px 24px", borderRadius: "0 0 14px 14px", fontSize: 13, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap" }}>
+        <div style={{ position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)", background: C.green, color: "#fff", padding: "10px 24px", borderRadius: "0 0 14px 14px", fontSize: 13, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap" }}>
           🔔 มีออร์เดอร์ใหม่!
         </div>
       )}
 
       {/* Topbar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", background: "#fff", borderBottom: "1px solid #E2DDD6", position: "sticky", top: 0, zIndex: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "#fff", borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 10 }}>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#1C1A17" }}>🍳 ครัว</div>
-          <div style={{ fontSize: 11, color: "#7A7570" }}>
-            {new Date().toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long" })}
-          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>🍳 ครัว</div>
+          <div style={{ fontSize: 11, color: C.muted }}>{new Date().toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long" })}</div>
         </div>
-        <button
-          onClick={playBeep}
-          style={{ padding: "6px 14px", background: "#F5F3EE", border: "1px solid #E2DDD6", borderRadius: 20, fontSize: 11, fontWeight: 600, color: "#7A7570", cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}
-        >
-          🔔 ทดสอบเสียง
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={playBeep} style={{ padding: "5px 10px", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 20, fontSize: 11, fontWeight: 600, color: C.muted, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>🔔 ทดสอบ</button>
+          <button onClick={() => setUnlocked(false)} style={{ padding: "5px 10px", background: C.redL, border: `1px solid #F5B4AE`, borderRadius: 20, fontSize: 11, fontWeight: 600, color: C.red, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>🔒 ล็อก</button>
+        </div>
       </div>
 
       {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, padding: "12px 16px" }}>
         {[
-          { label: "ทั้งหมด", val: total,                          color: "#1C1A17"  },
-          { label: "รอทำ",    val: pending,                        color: pending > 0 ? "#C0392B" : "#1C1A17" },
-          { label: "รายได้",  val: `${revenue.toLocaleString()}฿`, color: "#3B6B0F"  },
-        ].map((s) => (
-          <div key={s.label} style={{ background: "#fff", borderRadius: 10, padding: "10px 12px", textAlign: "center", border: "1px solid #E2DDD6" }}>
+          { label: "ทั้งหมด", val: total,                          color: C.text },
+          { label: "รอทำ",    val: pending,                        color: pending > 0 ? C.red : C.text },
+          { label: "รายได้",  val: `${revenue.toLocaleString()}฿`, color: C.green },
+        ].map(s => (
+          <div key={s.label} style={{ background: "#fff", borderRadius: 10, padding: "10px 12px", textAlign: "center", border: `1px solid ${C.border}` }}>
             <div style={{ fontSize: 22, fontWeight: 700, color: s.color }}>{s.val}</div>
-            <div style={{ fontSize: 10, color: "#7A7570", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".03em" }}>{s.label}</div>
+            <div style={{ fontSize: 10, color: C.muted, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".03em" }}>{s.label}</div>
           </div>
         ))}
       </div>
 
-      {/* Kanban columns */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, padding: "0 16px 24px" }}>
-        {COLS.map((col) => {
-          const colOrders = orders.filter((o) => o.status === col.status);
-          return (
-            <div key={col.status}>
+      {/* Tab bar */}
+      <div style={{ display: "flex", gap: 8, padding: "0 16px 12px" }}>
+        {[["kanban","📋 ออร์เดอร์"],["history","🕐 ประวัติ"]].map(([t, l]) => (
+          <button key={t} onClick={() => setTab(t as any)}
+            style={{ flex: 1, padding: "8px 0", border: `1px solid ${tab === t ? C.green : C.border}`, borderRadius: 10, background: tab === t ? C.greenL : "#fff", color: tab === t ? C.green : C.muted, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
+            {l}
+          </button>
+        ))}
+      </div>
 
-              {/* Column header */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 10px", borderRadius: 10, marginBottom: 8, background: col.hdrBg }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: col.hdrColor }}>{col.icon} {col.label}</span>
-                <span style={{ fontSize: 11, fontWeight: 700, background: col.cntBg, color: col.hdrColor, padding: "1px 8px", borderRadius: 10 }}>{colOrders.length}</span>
-              </div>
-
-              {/* Empty state */}
-              {colOrders.length === 0 && (
-                <div style={{ textAlign: "center", padding: "18px 0", fontSize: 12, color: "#B0A89E", border: "1.5px dashed #E2DDD6", borderRadius: 10 }}>
-                  ว่าง
+      {/* ── KANBAN ── */}
+      {tab === "kanban" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, padding: "0 16px 24px" }}>
+          {COLS.map(col => {
+            const colOrders = orders.filter(o => o.status === col.status);
+            return (
+              <div key={col.status}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 10px", borderRadius: 10, marginBottom: 8, background: col.hBg }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: col.hC }}>{col.icon} {col.label}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, background: col.cBg, color: col.hC, padding: "1px 8px", borderRadius: 10 }}>{colOrders.length}</span>
                 </div>
-              )}
-
-              {/* Order cards */}
-              {colOrders.map((o) => {
-                const warn   = isWarn(o);
-                const urgent = isUrgent(o);
-                return (
-                  <div
-                    key={o.id}
-                    style={{
-                      border:       urgent ? "1px solid #E2DDD6" : "1px solid #E2DDD6",
-                      borderLeft:   urgent ? "3px solid #C0392B" : "1px solid #E2DDD6",
-                      borderRadius: urgent ? "0 12px 12px 0"    : 12,
-                      padding: "11px 13px", marginBottom: 8, background: "#fff",
-                    }}
-                  >
-                    {/* หมายเลข + แผนก */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700 }}>#{String(o.id).padStart(4, "0")}</span>
-                      <span style={{ fontSize: 10, fontWeight: 700, background: "#EBF3DC", color: "#3B6B0F", padding: "2px 8px", borderRadius: 8 }}>
+                {colOrders.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "16px 0", fontSize: 11, color: "#B0A89E", border: `1.5px dashed ${C.border}`, borderRadius: 10 }}>ว่าง</div>
+                ) : colOrders.map(o => (
+                  <div key={o.id} style={{ border: `1px solid ${C.border}`, borderLeft: isWarn(o) && o.status === "new" ? `3px solid ${C.red}` : `1px solid ${C.border}`, borderRadius: 12, padding: "11px 12px", marginBottom: 8, background: "#fff" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700 }}>#{String(o.id).padStart(4,"0")}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, background: C.greenL, color: C.green, padding: "2px 7px", borderRadius: 8 }}>
                         {(o as any).departments?.name ?? o.dept_id}
                       </span>
                     </div>
-
-                    {/* ชื่อลูกค้า */}
-                    <div style={{ fontSize: 15, fontWeight: 700, color: "#1C1A17", marginBottom: 5 }}>
-                      {o.customer_name}
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 4 }}>{o.customer_name}</div>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: o.note ? 6 : 8, lineHeight: 1.6 }}>
+                      {o.items.map(it => `${it.name} ×${it.qty}`).join(" · ")}
                     </div>
-
-                    {/* รายการอาหาร */}
-                    <div style={{ fontSize: 12, color: "#7A7570", marginBottom: o.note ? 6 : 8, lineHeight: 1.6 }}>
-                      {o.items.map((it) => `${it.name} ×${it.qty}`).join("  ·  ")}
-                    </div>
-
-                    {/* หมายเหตุ */}
-                    {o.note && (
-                      <div style={{ fontSize: 11, color: "#C97A14", background: "#FEF3DC", padding: "4px 8px", borderRadius: 6, marginBottom: 8, fontWeight: 600 }}>
-                        📝 {o.note}
-                      </div>
-                    )}
-
-                    {/* Footer: timer + action btn + delete btn */}
+                    {o.note && <div style={{ fontSize: 11, color: C.amber, background: C.amberL, padding: "3px 8px", borderRadius: 6, marginBottom: 8, fontWeight: 600 }}>📝 {o.note}</div>}
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-
-                      {/* Timer */}
-                      <span style={{ fontSize: 11, fontWeight: 700, minWidth: 40, color: warn ? "#C0392B" : "#7A7570" }}>
-                        {fmtElapsed(o.created_at, o.started_at)}
+                      <span style={{ fontSize: 11, fontWeight: 700, minWidth: 38, color: isWarn(o) ? C.red : C.muted }}>
+                        {fmt(o.created_at, o.started_at)}
                       </span>
-
-                      {/* Action button: รับ / เสร็จ / ล้าง
-                          fix #3: ใช้ branch เดียว ไม่ซ้ำ
-                          - new     → "รับออร์เดอร์" → handleMove(cooking)
-                          - cooking → "เสร็จแล้ว"   → handleMove(done)
-                          - done    → "ล้างรายการ"  → handleDelete (ปุ่มเดียว ไม่มี 🗑 ซ้ำ)
-                      */}
-                      {col.nextStatus !== null ? (
-                        <button
-                          onClick={() => handleMove(o.id, col.nextStatus!)}
-                          style={{ flex: 1, padding: "6px 0", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer", background: col.btnBg, color: "#fff", fontFamily: "Sarabun, sans-serif" }}
-                        >
-                          {col.btnLabel}
+                      {col.next ? (
+                        <button onClick={() => handleMove(o.id, col.next!)}
+                          style={{ flex: 1, padding: "6px 0", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: "Sarabun, sans-serif" }}>
+                          {col.bLabel}
                         </button>
                       ) : (
-                        // done column: ปุ่ม "ล้างรายการ" = delete โดยตรง ไม่ต้องมี 🗑 ซ้ำ
-                        <button
-                          onClick={() => handleDelete(o.id)}
-                          style={{ flex: 1, padding: "6px 0", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer", background: col.btnBg, color: "#fff", fontFamily: "Sarabun, sans-serif" }}
-                        >
-                          {col.btnLabel}
+                        <button onClick={() => handleDelete(o.id)}
+                          style={{ flex: 1, padding: "6px 0", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: "Sarabun, sans-serif" }}>
+                          {col.bLabel}
                         </button>
                       )}
-
-                      {/* 🗑 delete: แสดงเฉพาะ new และ cooking (กรณีต้องการยกเลิก) */}
-                      {col.nextStatus !== null && (
-                        <button
-                          onClick={() => handleDelete(o.id)}
-                          style={{ padding: "6px 9px", border: "1px solid #E2DDD6", background: "transparent", borderRadius: 8, cursor: "pointer", fontSize: 13, color: "#7A7570" }}
-                          title="ยกเลิกออร์เดอร์"
-                        >
+                      {col.next && (
+                        <button onClick={() => handleDelete(o.id)}
+                          style={{ padding: "6px 8px", border: `1px solid ${C.border}`, background: "transparent", borderRadius: 8, cursor: "pointer", fontSize: 12, color: C.muted }}>
                           🗑
                         </button>
                       )}
                     </div>
                   </div>
-                );
-              })}
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── HISTORY ── */}
+      {tab === "history" && (
+        <div style={{ padding: "0 16px 24px" }}>
+          {/* filter */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            {[3,7,30].map(d => (
+              <button key={d} onClick={() => setHdays(d)}
+                style={{ flex: 1, padding: "7px 0", border: `1px solid ${hdays === d ? C.green : C.border}`, borderRadius: 10, background: hdays === d ? C.greenL : "#fff", color: hdays === d ? C.green : C.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
+                {d} วัน
+              </button>
+            ))}
+          </div>
+
+          {/* summary */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+            <div style={{ background: "#fff", borderRadius: 10, padding: "10px 14px", border: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: C.text }}>{history.length}</div>
+              <div style={{ fontSize: 10, color: C.muted, fontWeight: 600, textTransform: "uppercase" }}>ออร์เดอร์ทั้งหมด</div>
             </div>
-          );
-        })}
-      </div>
+            <div style={{ background: "#fff", borderRadius: 10, padding: "10px 14px", border: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: C.green }}>{history.reduce((s,o) => s+o.total,0).toLocaleString()}฿</div>
+              <div style={{ fontSize: 10, color: C.muted, fontWeight: 600, textTransform: "uppercase" }}>รายได้รวม</div>
+            </div>
+          </div>
+
+          {/* list */}
+          {history.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 32, color: C.muted, fontSize: 13 }}>ไม่มีรายการ</div>
+          ) : history.map(o => (
+            <div key={o.id} style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 12, padding: "12px 14px", marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: C.text }}>#{String(o.id).padStart(4,"0")} · {o.customer_name}</span>
+                <span style={{ fontSize: 10, background: o.status === "done" ? C.greenL : o.status === "cooking" ? C.amberL : C.redL, color: o.status === "done" ? C.green : o.status === "cooking" ? C.amber : C.red, padding: "2px 8px", borderRadius: 8, fontWeight: 700 }}>
+                  {o.status === "done" ? "เสร็จ" : o.status === "cooking" ? "ปรุง" : "ใหม่"}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>
+                {(o as any).departments?.name ?? o.dept_id} · {fmtDate(o.created_at)}
+              </div>
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>
+                {o.items.map(it => `${it.name} ×${it.qty}`).join(" · ")}
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.green, textAlign: "right" }}>{o.total} บาท</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
