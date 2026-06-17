@@ -10,13 +10,15 @@ import {
   getDepartmentById,
   getMenuItems,
   createOrder,
+  getTodayAnnouncement,
+  subscribeToAnnouncements,
   supabase,
 } from "@/lib/supabase";
 import type { Department, MenuItem, Order, OrderItem } from "@/types";
 
 const S = {
   app: {
-    minHeight: "100dvh",
+    maxWidth: 420, margin: "0 auto", minHeight: "100dvh",
     background: "#fff", fontFamily: "Sarabun, sans-serif",
     display: "flex", flexDirection: "column" as const,
   },
@@ -49,6 +51,8 @@ function OrderFlow() {
   const [cat,        setCat]        = useState("ทั้งหมด");
   const [order,      setOrder]      = useState<Order | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [announcement, setAnnouncement] = useState<string | null>(null);
+  const [showBanner,   setShowBanner]   = useState(false);
 
   // โหลด dept + menu
   useEffect(() => {
@@ -62,6 +66,18 @@ function OrderFlow() {
       .catch(() => setError("โหลดข้อมูลไม่ได้ กรุณาลองใหม่"))
       .finally(() => setLoading(false));
   }, [deptId]);
+
+  // โหลดประกาศวันนี้ + realtime
+  useEffect(() => {
+    getTodayAnnouncement().then(a => {
+      if (a) { setAnnouncement(a.message); setShowBanner(true); }
+    });
+    const ch = subscribeToAnnouncements((payload) => {
+      setAnnouncement(payload.new.message);
+      setShowBanner(true);
+    });
+    return () => { supabase.removeChannel(ch); };
+  }, []);
 
   // realtime ติดตามออร์เดอร์ของตัวเอง
   useEffect(() => {
@@ -170,6 +186,12 @@ function OrderFlow() {
         </div>
         <span style={S.badge}>{dept.name}</span>
       </div>
+      {showBanner && announcement && (
+        <div style={{ margin: "10px 16px 0", padding: "10px 14px", background: "#FEF3DC", borderRadius: 10, fontSize: 13, fontWeight: 600, color: "#C97A14", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <span>📢 {announcement}</span>
+          <button onClick={() => setShowBanner(false)} style={{ background: "transparent", border: "none", color: "#C97A14", fontSize: 16, cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 6, padding: "10px 16px", overflowX: "auto", borderBottom: "1px solid #E2DDD6", position: "sticky", top: 57, background: "#fff", zIndex: 9 }}>
         {CATS.map((c) => (
           <button key={c} onClick={() => setCat(c)} style={{ padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", border: cat === c ? "none" : "1.5px solid #E2DDD6", background: cat === c ? "#3B6B0F" : "transparent", color: cat === c ? "#fff" : "#7A7570", fontFamily: "Sarabun, sans-serif" }}>

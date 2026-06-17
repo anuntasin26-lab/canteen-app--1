@@ -16,6 +16,7 @@ export interface MenuItem {
   emoji: string;
   available: boolean;
   sort_order: number;
+  ingredients?: string;
 }
 
 export interface OrderItem {
@@ -36,6 +37,11 @@ export interface Order {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
-  // joined
   departments?: Department;
+}
+
+export interface Announcement {
+  id: number;
+  message: string;
+  created_at: string;
 }

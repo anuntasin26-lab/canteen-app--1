@@ -29,16 +29,77 @@ export async function toggleMenuItem(id: number, available: boolean) {
   if (error) throw error;
 }
 
-/** ครัวแก้ราคาเมนู */
-export async function updateMenuPrice(id: number, price: number) {
+/** ครัวแก้ไขเมนู: ชื่อ, ราคา, วัตถุดิบ — แล้วบันทึก log อัตโนมัติ */
+export async function updateMenuItem(id: number, fields: {
+  name?: string;
+  price?: number;
+  ingredients?: string;
+}) {
   const { error } = await supabase
-    .from("menu_items").update({ price }).eq("id", id);
+    .from("menu_items").update(fields).eq("id", id);
+  if (error) throw error;
+
+  // บันทึก log สำหรับดูประวัติย้อนหลัง
+  const { data: item } = await supabase
+    .from("menu_items").select("*").eq("id", id).single();
+  if (item) {
+    await supabase.from("menu_history_log").insert({
+      menu_id: id,
+      name: item.name,
+      price: item.price,
+      available: item.available,
+    });
+  }
+}
+
+// ── Announcements ────────────────────────────────────────
+/** ครัวประกาศแจ้งเตือนถึงทุก user */
+export async function createAnnouncement(message: string) {
+  const { error } = await supabase
+    .from("announcements").insert({ message });
   if (error) throw error;
 }
 
-// ── Orders ────────────────────────────────────────────────
+/** ดึงประกาศล่าสุดของวันนี้ (ลูกค้าใช้แสดง banner) */
+export async function getTodayAnnouncement() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const { data, error } = await supabase
+    .from("announcements")
+    .select("*")
+    .gte("created_at", today.toISOString())
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return data?.[0] ?? null;
+}
 
-/** ออร์เดอร์วันนี้ (ครัว) */
+export function subscribeToAnnouncements(callback: (payload: any) => void) {
+  return supabase
+    .channel("announcements-realtime")
+    .on("postgres_changes",
+      { event: "INSERT", schema: "public", table: "announcements" },
+      callback
+    )
+    .subscribe();
+}
+
+// ── Menu History ──────────────────────────────────────────
+/** ดูเมนูย้อนหลังตามวัน */
+export async function getMenuHistory(days = 7) {
+  const from = new Date();
+  from.setDate(from.getDate() - days);
+  from.setHours(0, 0, 0, 0);
+  const { data, error } = await supabase
+    .from("menu_history_log")
+    .select("*")
+    .gte("created_at", from.toISOString())
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+// ── Orders ────────────────────────────────────────────────
 export async function getTodayOrders() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -51,7 +112,6 @@ export async function getTodayOrders() {
   return data;
 }
 
-/** ประวัติออร์เดอร์ย้อนหลัง (ครัว) — เลือกได้กี่วัน */
 export async function getOrderHistory(days = 7) {
   const from = new Date();
   from.setDate(from.getDate() - days);
@@ -65,7 +125,6 @@ export async function getOrderHistory(days = 7) {
   return data;
 }
 
-/** ประวัติออร์เดอร์ของแผนกนั้น (user) */
 export async function getDeptHistory(deptId: string, days = 7) {
   const from = new Date();
   from.setDate(from.getDate() - days);
@@ -80,7 +139,6 @@ export async function getDeptHistory(deptId: string, days = 7) {
   return data;
 }
 
-/** สร้างออร์เดอร์ */
 export async function createOrder(payload: {
   dept_id: string;
   customer_name: string;
@@ -94,7 +152,6 @@ export async function createOrder(payload: {
   return data;
 }
 
-/** อัปเดต status */
 export async function updateOrderStatus(id: number, status: "cooking" | "done") {
   const extra =
     status === "cooking"
@@ -105,7 +162,6 @@ export async function updateOrderStatus(id: number, status: "cooking" | "done") 
   if (error) throw error;
 }
 
-/** ลบออร์เดอร์ */
 export async function deleteOrder(id: number) {
   const { error } = await supabase.from("orders").delete().eq("id", id);
   if (error) throw error;
