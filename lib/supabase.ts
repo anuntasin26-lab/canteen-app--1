@@ -39,7 +39,6 @@ export async function updateMenuItem(id: number, fields: {
     .from("menu_items").update(fields).eq("id", id);
   if (error) throw error;
 
-  // บันทึก log สำหรับดูประวัติย้อนหลัง
   const { data: item } = await supabase
     .from("menu_items").select("*").eq("id", id).single();
   if (item) {
@@ -50,6 +49,30 @@ export async function updateMenuItem(id: number, fields: {
       available: item.available,
     });
   }
+}
+
+/** ครัวเพิ่มเมนูใหม่ */
+export async function createMenuItem(fields: {
+  name: string;
+  price: number;
+  category: string;
+  emoji?: string;
+  ingredients?: string;
+}) {
+  const { data, error } = await supabase
+    .from("menu_items")
+    .insert({ ...fields, available: true, sort_order: 999 })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** ครัวลบเมนู */
+export async function deleteMenuItem(id: number) {
+  const { error } = await supabase
+    .from("menu_items").delete().eq("id", id);
+  if (error) throw error;
 }
 
 // ── Announcements ────────────────────────────────────────

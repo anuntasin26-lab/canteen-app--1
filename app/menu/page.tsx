@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import {
   getMenuItems, toggleMenuItem, updateMenuItem,
+  createMenuItem, deleteMenuItem,
   createAnnouncement, subscribeToMenuItems, supabase,
 } from "@/lib/supabase";
 import type { MenuItem } from "@/types";
@@ -36,6 +37,14 @@ export default function MenuPage() {
   const [annText,    setAnnText]    = useState("");
   const [annSending, setAnnSending] = useState(false);
   const [showAnn,    setShowAnn]    = useState(false);
+  const [showAdd,    setShowAdd]    = useState(false);
+  const [newName,    setNewName]    = useState("");
+  const [newPrice,   setNewPrice]   = useState("");
+  const [newCat,     setNewCat]     = useState("ข้าว");
+  const [newEmoji,   setNewEmoji]   = useState("🍽️");
+  const [newIng,     setNewIng]     = useState("");
+  const [adding,     setAdding]     = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
   const handlePin = (p: string) => {
     setPin(p);
@@ -71,7 +80,9 @@ export default function MenuPage() {
       await toggleMenuItem(item.id, !item.available);
       setItems(p => p.map(m => m.id === item.id ? { ...m, available: !m.available } : m));
       showToast(item.available ? `ปิด "${item.name}" แล้ว` : `เปิด "${item.name}" แล้ว`);
-    } catch { alert("เกิดข้อผิดพลาด"); }
+    } catch (e: any) {
+      alert("เปิด/ปิดไม่สำเร็จ: " + (e?.message ?? "ตรวจสอบ RLS policy ของตาราง menu_items"));
+    }
     finally { setSaving(null); }
   };
 
@@ -98,8 +109,44 @@ export default function MenuPage() {
         : m));
       setEditing(null);
       showToast(`อัปเดต "${editName.trim()}" แล้ว`);
-    } catch { alert("เกิดข้อผิดพลาด"); }
+    } catch (e: any) {
+      alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "ไม่ทราบสาเหตุ — ตรวจสอบ RLS policy ของตาราง menu_items"));
+    }
     finally { setSaving(null); }
+  };
+
+  const handleAddMenu = async () => {
+    if (!newName.trim()) { alert("กรุณากรอกชื่อเมนู"); return; }
+    const p = parseInt(newPrice);
+    if (!p || p <= 0) { alert("ราคาไม่ถูกต้อง"); return; }
+    setAdding(true);
+    try {
+      const created = await createMenuItem({
+        name: newName.trim(),
+        price: p,
+        category: newCat,
+        emoji: newEmoji,
+        ingredients: newIng.trim(),
+      });
+      setItems(prev => [...prev, created as MenuItem]);
+      setShowAdd(false);
+      setNewName(""); setNewPrice(""); setNewIng(""); setNewEmoji("🍽️");
+      showToast(`เพิ่มเมนู "${created.name}" แล้ว`);
+    } catch (e: any) {
+      alert("เพิ่มเมนูไม่สำเร็จ: " + (e?.message ?? "ไม่ทราบสาเหตุ — ตรวจสอบ RLS policy"));
+    }
+    finally { setAdding(false); }
+  };
+
+  const handleDelete = async (item: MenuItem) => {
+    try {
+      await deleteMenuItem(item.id);
+      setItems(prev => prev.filter(m => m.id !== item.id));
+      setDeleteConfirm(null);
+      showToast(`ลบ "${item.name}" แล้ว`);
+    } catch (e: any) {
+      alert("ลบไม่สำเร็จ: " + (e?.message ?? "ไม่ทราบสาเหตุ — มีออร์เดอร์ที่อ้างอิงเมนูนี้อยู่หรือไม่"));
+    }
   };
 
   const handleAnnounce = async () => {
@@ -193,14 +240,52 @@ export default function MenuPage() {
         )}
       </div>
 
-      <div style={{ display: "flex", gap: 6, padding: "12px 16px", overflowX: "auto", scrollbarWidth: "none" }}>
+      <div style={{ display: "flex", gap: 6, padding: "12px 16px", overflowX: "auto", scrollbarWidth: "none", alignItems: "center" }}>
         {CATS.map(c => (
           <button key={c} onClick={() => setCat(c)}
             style={{ padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", border: cat === c ? "none" : `1px solid ${C.border}`, background: cat === c ? C.green : "transparent", color: cat === c ? "#fff" : C.muted, fontFamily: "Sarabun, sans-serif" }}>
             {c}
           </button>
         ))}
+        <button onClick={() => setShowAdd(true)}
+          style={{ padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", cursor: "pointer", border: "none", background: C.amber, color: "#fff", fontFamily: "Sarabun, sans-serif", marginLeft: "auto", flexShrink: 0 }}>
+          + เพิ่มเมนู
+        </button>
       </div>
+
+      {showAdd && (
+        <div style={{ margin: "0 16px 12px", padding: "14px", background: "#fff", border: `1.5px solid ${C.amber}`, borderRadius: 14 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🍽️ เมนูใหม่</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input value={newEmoji} onChange={e => setNewEmoji(e.target.value)} placeholder="🍽️"
+                style={{ width: 50, padding: "8px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 16, textAlign: "center", fontFamily: "Sarabun, sans-serif" }} />
+              <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ชื่อเมนู"
+                style={{ flex: 1, padding: "8px 12px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: "Sarabun, sans-serif" }} />
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input type="number" value={newPrice} onChange={e => setNewPrice(e.target.value)} placeholder="ราคา"
+                style={{ flex: 1, padding: "8px 12px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: "Sarabun, sans-serif" }} />
+              <select value={newCat} onChange={e => setNewCat(e.target.value)}
+                style={{ flex: 1, padding: "8px 12px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: "Sarabun, sans-serif" }}>
+                {CATS.filter(c => c !== "ทั้งหมด").map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <input value={newIng} onChange={e => setNewIng(e.target.value)} placeholder="วัตถุดิบ (ถ้ามี)"
+              style={{ padding: "8px 12px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: "Sarabun, sans-serif" }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={handleAddMenu} disabled={adding}
+                style={{ flex: 1, padding: "9px", background: C.amber, color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
+                {adding ? "กำลังเพิ่ม..." : "เพิ่มเมนู"}
+              </button>
+              <button onClick={() => setShowAdd(false)}
+                style={{ flex: 1, padding: "9px", background: C.bg, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
+                ยกเลิก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ padding: "0 16px 24px", display: "flex", flexDirection: "column", gap: 8 }}>
         {loading ? (
@@ -258,7 +343,29 @@ export default function MenuPage() {
                     style={{ flex: 1, padding: "9px", background: C.bg, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
                     ยกเลิก
                   </button>
+                  <button onClick={() => setDeleteConfirm(item.id)}
+                    style={{ padding: "9px 14px", background: C.redL, color: C.red, border: `1px solid #F5B4AE`, borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
+                    🗑 ลบ
+                  </button>
                 </div>
+
+                {deleteConfirm === item.id && (
+                  <div style={{ marginTop: 10, padding: "12px", background: C.redL, borderRadius: 10, border: `1px solid #F5B4AE` }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: C.red, marginBottom: 8 }}>
+                      ⚠️ ลบ "{item.name}" ถาวร? ลบแล้วกู้คืนไม่ได้
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={() => handleDelete(item)}
+                        style={{ flex: 1, padding: "8px", background: C.red, color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
+                        ยืนยันลบ
+                      </button>
+                      <button onClick={() => setDeleteConfirm(null)}
+                        style={{ flex: 1, padding: "8px", background: "#fff", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
+                        ไม่ลบ
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
