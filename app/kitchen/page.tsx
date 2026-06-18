@@ -48,24 +48,36 @@ const COLS = [
 
 // ─────────────────────────────────────────────────────────
 export default function KitchenPage() {
-  const [pin,     setPin]     = useState("");
-  const [unlocked,setUnlocked]= useState(false);
-  const [pinError,setPinError]= useState(false);
-  const [tab,     setTab]     = useState<"kanban"|"history">("kanban");
-  const [orders,  setOrders]  = useState<Order[]>([]);
+  const [pin, setPin] = useState("");
+  const [unlocked, setUnlocked] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return sessionStorage.getItem("kitchen_unlocked") === "1";
+  });
+  const [pinError, setPinError] = useState(false);
+  const [tab, setTab] = useState<"kanban" | "history">("kanban");
+  const [orders, setOrders] = useState<Order[]>([]);
   const [history, setHistory] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
-  const [toast,   setToast]   = useState(false);
-  const [hdays,   setHdays]   = useState(7);
+  const [toast, setToast] = useState(false);
+  const [hdays, setHdays] = useState(7);
   const audioRef = useRef<AudioContext | null>(null);
 
   // ── PIN check ─────────────────────────────────────────
   const handlePin = (p: string) => {
     setPin(p);
     if (p.length === 4) {
-      if (p === KITCHEN_PIN) { setUnlocked(true); setPinError(false); }
+      if (p === KITCHEN_PIN) {
+        setUnlocked(true);
+        setPinError(false);
+        sessionStorage.setItem("kitchen_unlocked", "1");
+      }
       else { setPinError(true); setTimeout(() => { setPin(""); setPinError(false); }, 800); }
     }
+  };
+
+  const handleLock = () => {
+    setUnlocked(false);
+    sessionStorage.removeItem("kitchen_unlocked");
   };
 
   // ── load orders ───────────────────────────────────────
@@ -81,6 +93,20 @@ export default function KitchenPage() {
     if (!unlocked || tab !== "history") return;
     getOrderHistory(hdays).then(d => setHistory(d as Order[]));
   }, [unlocked, tab, hdays]);
+
+  const playBeep = () => {
+    try {
+      if (!audioRef.current) audioRef.current = new AudioContext();
+      const ctx = audioRef.current;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.start(); osc.stop(ctx.currentTime + 0.4);
+    } catch { }
+  };
 
   // ── realtime ──────────────────────────────────────────
   useEffect(() => {
@@ -110,20 +136,6 @@ export default function KitchenPage() {
     const t = setInterval(() => setOrders(p => [...p]), 1000);
     return () => clearInterval(t);
   }, []);
-
-  const playBeep = () => {
-    try {
-      if (!audioRef.current) audioRef.current = new AudioContext();
-      const ctx = audioRef.current;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.frequency.value = 880;
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-      osc.start(); osc.stop(ctx.currentTime + 0.4);
-    } catch { }
-  };
 
   const handleMove = async (id: number, status: "cooking" | "done") => {
     try {
@@ -196,7 +208,7 @@ export default function KitchenPage() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={playBeep} style={{ padding: "5px 10px", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 20, fontSize: 11, fontWeight: 600, color: C.muted, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>🔔 ทดสอบ</button>
-          <button onClick={() => setUnlocked(false)} style={{ padding: "5px 10px", background: C.redL, border: `1px solid #F5B4AE`, borderRadius: 20, fontSize: 11, fontWeight: 600, color: C.red, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>🔒 ล็อก</button>
+          <button onClick={handleLock} style={{ padding: "5px 10px", background: C.redL, border: `1px solid #F5B4AE`, borderRadius: 20, fontSize: 11, fontWeight: 600, color: C.red, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>🔒 ล็อก</button>
         </div>
       </div>
 

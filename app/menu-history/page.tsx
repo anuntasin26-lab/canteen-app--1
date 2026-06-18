@@ -20,6 +20,7 @@ export default function MenuHistoryPage() {
   const [pin,      setPin]      = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [pinError, setPinError] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [logs,     setLogs]     = useState<any[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [days,     setDays]     = useState(7);
@@ -27,9 +28,24 @@ export default function MenuHistoryPage() {
   const handlePin = (p: string) => {
     setPin(p);
     if (p.length === 4) {
-      if (p === MENU_PIN) { setUnlocked(true); setPinError(false); }
+      if (p === MENU_PIN) {
+        setUnlocked(true);
+        setPinError(false);
+        sessionStorage.setItem("kitchen_unlocked", "1");
+      }
       else { setPinError(true); setTimeout(() => { setPin(""); setPinError(false); }, 800); }
     }
+  };
+
+  // ตรวจ sessionStorage ตอนโหลดหน้า — refresh แล้วไม่ต้องใส่ PIN ซ้ำ
+  useEffect(() => {
+    if (sessionStorage.getItem("kitchen_unlocked") === "1") setUnlocked(true);
+    setCheckingSession(false);
+  }, []);
+
+  const handleLock = () => {
+    setUnlocked(false);
+    sessionStorage.removeItem("kitchen_unlocked");
   };
 
   useEffect(() => {
@@ -45,6 +61,10 @@ export default function MenuHistoryPage() {
     if (!grouped[day]) grouped[day] = [];
     grouped[day].push(log);
   });
+
+  if (checkingSession) return (
+    <div style={{ minHeight: "100dvh", background: C.bg }} />
+  );
 
   if (!unlocked) return (
     <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: C.bg, fontFamily: "Sarabun, sans-serif", padding: 24 }}>
@@ -79,7 +99,7 @@ export default function MenuHistoryPage() {
           <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>🕐 ประวัติเมนู</div>
           <div style={{ fontSize: 11, color: C.muted }}>การแก้ไขเมนูที่ผ่านมา</div>
         </div>
-        <button onClick={() => setUnlocked(false)} style={{ padding: "5px 10px", background: C.redL, border: `1px solid #F5B4AE`, borderRadius: 20, fontSize: 11, fontWeight: 600, color: C.red, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>🔒 ล็อก</button>
+        <button onClick={handleLock} style={{ padding: "5px 10px", background: C.redL, border: `1px solid #F5B4AE`, borderRadius: 20, fontSize: 11, fontWeight: 600, color: C.red, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>🔒 ล็อก</button>
       </div>
 
       <div style={{ display: "flex", gap: 6, padding: "12px 16px" }}>
