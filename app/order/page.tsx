@@ -1,7 +1,7 @@
 "use client";
 
 // ─── app/order/page.tsx ───────────────────────────────────
-//  fix: ห่อ useSearchParams() ด้วย <Suspense> (Next.js 14+)
+//  เพิ่ม: localStorage persist, แก้ชื่อ, ยกเลิกออเดอร์
 // ─────────────────────────────────────────────────────────
 
 import { Suspense, useEffect, useState } from "react";
@@ -15,6 +15,10 @@ import {
   supabase,
 } from "@/lib/supabase";
 import type { Department, MenuItem, Order, OrderItem } from "@/types";
+
+// ── localStorage keys ─────────────────────────────────────
+const LS_NAME     = "petpal_name";
+const LS_ORDER_ID = "petpal_order_id";
 
 const S = {
   app: {
@@ -35,39 +39,90 @@ const S = {
   },
 };
 
-// ── Inner component (ใช้ useSearchParams ได้ปลอดภัยในนี้) ──
+// ── Inner component ───────────────────────────────────────
 function OrderFlow() {
   const params  = useSearchParams();
   const deptId  = params.get("dept") ?? "";
 
-  const [dept,       setDept]       = useState<Department | null>(null);
-  const [menuItems,  setMenuItems]  = useState<MenuItem[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [error,      setError]      = useState<string | null>(null);
-  const [screen,     setScreen]     = useState<"name"|"menu"|"cart"|"status">("name");
-  const [name,       setName]       = useState("");
-  const [cart,       setCart]       = useState<Record<number, number>>({});
-  const [note,       setNote]       = useState("");
-  const [cat,        setCat]        = useState("ทั้งหมด");
-  const [order,      setOrder]      = useState<Order | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [announcement, setAnnouncement] = useState<string | null>(null);
-  const [showBanner,   setShowBanner]   = useState(false);
+  const [dept,        setDept]        = useState<Department | null>(null);
+  const [menuItems,   setMenuItems]   = useState<MenuItem[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState<string | null>(null);
+  const [screen,      setScreen]      = useState<"name"|"menu"|"cart"|"status">("name");
+  const [name,        setName]        = useState("");
+  const [cart,        setCart]        = useState<Record<number, number>>({});
+  const [note,        setNote]        = useState("");
+  const [cat,         setCat]         = useState("ทั้งหมด");
+  const [order,       setOrder]       = useState<Order | null>(null);
+  const [submitting,  setSubmitting]  = useState(false);
+  const [announcement,  setAnnouncement]  = useState<string | null>(null);
+  const [showBanner,    setShowBanner]    = useState(false);
 
-  // โหลด dept + menu
+  // ── ฟีเจอร์แก้ชื่อ ────────────────────────────────────
+  const [editingName,  setEditingName]  = useState(false);
+  const [newName,      setNewName]      = useState("");
+  const [savingName,   setSavingName]   = useState(false);
+
+  // ── ฟีเจอร์ยกเลิก ─────────────────────────────────────
+  const [cancelling,   setCancelling]   = useState(false);
+
+  // ── โหลด dept + menu + ตรวจ localStorage ──────────────
   useEffect(() => {
     if (!deptId) {
       setError("ไม่พบรหัสแผนก — กรุณาสแกน QR ใหม่");
       setLoading(false);
       return;
     }
+
+    const savedName    = localStorage.getItem(LS_NAME) ?? "";
+    const savedOrderId = localStorage.getItem(LS_ORDER_ID);
+
     Promise.all([getDepartmentById(deptId), getMenuItems()])
-      .then(([d, m]) => { setDept(d); setMenuItems(m); })
+      .then(async ([d, m]) => {
+        setDept(d);
+        setMenuItems(m);
+
+        // ถ้ามีชื่อค้างไว้ → ใส่ชื่อกลับมา
+        if (savedName) setName(savedName);
+
+        // ถ้ามี orderId ค้างไว้ → โหลด order กลับมาแสดงหน้า status
+        if (savedOrderId) {
+          try {
+            const { data, error: oErr } = await supabase
+              .from("orders")
+              .select("*")
+              .eq("id", Number(savedOrderId))
+              .single();
+
+            if (!oErr && data) {
+              // ตรวจว่า order ยังเป็นของวันนี้อยู่
+              const orderDate = new Date(data.created_at);
+              const today     = new Date();
+              const sameDay   =
+                orderDate.getFullYear() === today.getFullYear() &&
+                orderDate.getMonth()    === today.getMonth()    &&
+                orderDate.getDate()     === today.getDate();
+
+              if (sameDay && data.status !== "cancelled") {
+                setOrder(data);
+                setScreen("status");
+              } else {
+                // order เก่าแล้ว หรือถูกยกเลิกแล้ว → ล้าง
+                localStorage.removeItem(LS_ORDER_ID);
+              }
+            } else {
+              localStorage.removeItem(LS_ORDER_ID);
+            }
+          } catch {
+            localStorage.removeItem(LS_ORDER_ID);
+          }
+        }
+      })
       .catch(() => setError("โหลดข้อมูลไม่ได้ กรุณาลองใหม่"))
       .finally(() => setLoading(false));
   }, [deptId]);
 
-  // โหลดประกาศวันนี้ + realtime
+  // ── ประกาศ realtime ────────────────────────────────────
   useEffect(() => {
     getTodayAnnouncement().then(a => {
       if (a) { setAnnouncement(a.message); setShowBanner(true); }
@@ -79,7 +134,7 @@ function OrderFlow() {
     return () => { supabase.removeChannel(ch); };
   }, []);
 
-  // realtime ติดตามออร์เดอร์ของตัวเอง
+  // ── realtime ติดตาม order ────────────────────────────
   useEffect(() => {
     if (!order) return;
     const ch = supabase
@@ -94,8 +149,8 @@ function OrderFlow() {
     return () => { supabase.removeChannel(ch); };
   }, [order?.id]);
 
-  const CATS      = ["ทั้งหมด", ...Array.from(new Set(menuItems.map((m) => m.category)))];
-  const filtered  = cat === "ทั้งหมด" ? menuItems : menuItems.filter((m) => m.category === cat);
+  const CATS     = ["ทั้งหมด", ...Array.from(new Set(menuItems.map((m) => m.category)))];
+  const filtered = cat === "ทั้งหมด" ? menuItems : menuItems.filter((m) => m.category === cat);
   const cartItems = menuItems.filter((m) => (cart[m.id] ?? 0) > 0);
   const total     = cartItems.reduce((s, m) => s + m.price * cart[m.id], 0);
   const itemCount = Object.values(cart).reduce((s, v) => s + v, 0);
@@ -108,6 +163,13 @@ function OrderFlow() {
       return n;
     });
 
+  // ── บันทึกชื่อแล้วไปหน้า menu ─────────────────────────
+  const handleGoMenu = () => {
+    localStorage.setItem(LS_NAME, name.trim());
+    setScreen("menu");
+  };
+
+  // ── ยืนยันสั่งอาหาร ────────────────────────────────────
   const handleConfirm = async () => {
     if (!dept || !name.trim() || cartItems.length === 0) return;
     setSubmitting(true);
@@ -122,6 +184,8 @@ function OrderFlow() {
         note: note.trim() || undefined,
         total,
       });
+      // บันทึก orderId ลง localStorage
+      localStorage.setItem(LS_ORDER_ID, String(newOrder.id));
       setOrder(newOrder);
       setScreen("status");
     } catch {
@@ -131,6 +195,62 @@ function OrderFlow() {
     }
   };
 
+  // ── แก้ไขชื่อหลังสั่งแล้ว ──────────────────────────────
+  const handleSaveName = async () => {
+    if (!order || !newName.trim()) return;
+    setSavingName(true);
+    try {
+      const { error } = await supabase
+        .from("orders")
+        .update({ customer_name: newName.trim() })
+        .eq("id", order.id);
+      if (error) throw error;
+      setOrder((prev) => prev ? { ...prev, customer_name: newName.trim() } : prev);
+      localStorage.setItem(LS_NAME, newName.trim());
+      setName(newName.trim());
+      setEditingName(false);
+    } catch {
+      alert("แก้ไขชื่อไม่ได้ กรุณาลองใหม่");
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  // ── ยกเลิกออเดอร์ (เฉพาะ status = new) ───────────────
+  const handleCancel = async () => {
+    if (!order) return;
+    const confirmed = window.confirm("ยืนยันยกเลิกออเดอร์นี้?");
+    if (!confirmed) return;
+    setCancelling(true);
+    try {
+      const { error } = await supabase
+        .from("orders")
+        .update({ status: "cancelled" })
+        .eq("id", order.id);
+      if (error) throw error;
+      // ล้าง localStorage แล้วกลับหน้าเมนู
+      localStorage.removeItem(LS_ORDER_ID);
+      setOrder(null);
+      setCart({});
+      setNote("");
+      setScreen("menu");
+    } catch {
+      alert("ยกเลิกไม่ได้ กรุณาลองใหม่");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  // ── สั่งใหม่ ───────────────────────────────────────────
+  const handleReorder = () => {
+    localStorage.removeItem(LS_ORDER_ID);
+    setOrder(null);
+    setCart({});
+    setNote("");
+    setScreen("menu");
+  };
+
+  // ── Loading / Error ────────────────────────────────────
   if (loading) return (
     <div style={{ ...S.app, alignItems: "center", justifyContent: "center" }}>
       <p style={{ color: "#7A7570" }}>กำลังโหลด...</p>
@@ -142,7 +262,7 @@ function OrderFlow() {
     </div>
   );
 
-  // ── NAME ─────────────────────────────────────────────
+  // ── NAME ──────────────────────────────────────────────
   if (screen === "name") return (
     <div style={S.app}>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "32px 24px", gap: 24 }}>
@@ -158,14 +278,14 @@ function OrderFlow() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && name.trim() && setScreen("menu")}
+            onKeyDown={(e) => e.key === "Enter" && name.trim() && handleGoMenu()}
             placeholder="เช่น สมชาย, วิไล..."
             autoFocus
             style={{ padding: "14px 16px", border: "1.5px solid #E2DDD6", borderRadius: 12, fontSize: 16, fontFamily: "Sarabun, sans-serif", background: "#F5F3EE", outline: "none" }}
           />
           <button
             disabled={!name.trim()}
-            onClick={() => setScreen("menu")}
+            onClick={handleGoMenu}
             style={{ padding: 14, background: name.trim() ? "#3B6B0F" : "#E2DDD6", color: name.trim() ? "#fff" : "#7A7570", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: name.trim() ? "pointer" : "not-allowed", fontFamily: "Sarabun, sans-serif" }}
           >
             ดูเมนู →
@@ -175,7 +295,7 @@ function OrderFlow() {
     </div>
   );
 
-  // ── MENU ─────────────────────────────────────────────
+  // ── MENU ──────────────────────────────────────────────
   if (screen === "menu") return (
     <div style={S.app}>
       <div style={S.topbar}>
@@ -237,7 +357,7 @@ function OrderFlow() {
     </div>
   );
 
-  // ── CART ─────────────────────────────────────────────
+  // ── CART ──────────────────────────────────────────────
   if (screen === "cart") return (
     <div style={S.app}>
       <div style={S.topbar}>
@@ -287,54 +407,110 @@ function OrderFlow() {
     </div>
   );
 
-  // ── STATUS ───────────────────────────────────────────
+  // ── STATUS ────────────────────────────────────────────
   const statusMeta = {
-    new:     { icon: "📋", title: "ออร์เดอร์ถูกส่งแล้ว", sub: "รอร้านรับออร์เดอร์",     bg: "#EEF2FF" },
-    cooking: { icon: "👨‍🍳", title: "กำลังปรุงอาหาร",     sub: "ประมาณ 10–15 นาที",      bg: "#FEF3DC" },
-    done:    { icon: "✅", title: "อาหารพร้อมแล้ว!",    sub: "รับที่เคาน์เตอร์ได้เลย",  bg: "#EBF3DC" },
+    new:       { icon: "📋", title: "ออร์เดอร์ถูกส่งแล้ว", sub: "รอร้านรับออร์เดอร์",     bg: "#EEF2FF" },
+    cooking:   { icon: "👨‍🍳", title: "กำลังปรุงอาหาร",     sub: "ประมาณ 10–15 นาที",      bg: "#FEF3DC" },
+    done:      { icon: "✅", title: "อาหารพร้อมแล้ว!",    sub: "รับที่เคาน์เตอร์ได้เลย",  bg: "#EBF3DC" },
+    cancelled: { icon: "❌", title: "ยกเลิกแล้ว",         sub: "",                         bg: "#FDECEA" },
   };
-  const sm = statusMeta[order?.status ?? "new"];
+  const sm = statusMeta[(order?.status as keyof typeof statusMeta) ?? "new"];
+  const canCancel   = order?.status === "new";
+  const canEditName = order?.status === "new" || order?.status === "cooking";
 
   return (
     <div style={S.app}>
       <div style={S.topbar}>
         <div>
           <div style={S.title}>สถานะออร์เดอร์</div>
-          <div style={S.sub}>#{String(order?.id).padStart(4, "0")} · {name}</div>
+          <div style={S.sub}>#{String(order?.id).padStart(4, "0")} · {order?.customer_name}</div>
         </div>
         <span style={{ ...S.badge, background: sm.bg }}>
-          {order?.status === "done" ? "เสร็จแล้ว" : order?.status === "cooking" ? "กำลังทำ" : "ใหม่"}
+          {order?.status === "done" ? "เสร็จแล้ว" : order?.status === "cooking" ? "กำลังทำ" : order?.status === "cancelled" ? "ยกเลิก" : "ใหม่"}
         </span>
       </div>
+
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "28px 20px 16px", gap: 8, textAlign: "center" }}>
         <div style={{ width: 64, height: 64, borderRadius: "50%", background: sm.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, marginBottom: 4 }}>{sm.icon}</div>
         <div style={{ fontSize: 18, fontWeight: 700 }}>{sm.title}</div>
         <div style={{ fontSize: 13, color: "#7A7570" }}>{sm.sub}</div>
       </div>
-      <div style={{ padding: "0 28px 16px" }}>
-        {(["new", "cooking", "done"] as const).map((s, i, arr) => {
-          const pastDone = (order?.status === "cooking" && i === 0) || order?.status === "done";
-          const isFirst  = i === 0;
-          const isActive = order?.status === s;
-          const labels   = ["ส่งออร์เดอร์แล้ว", "กำลังปรุงอาหาร", "พร้อมเสิร์ฟ"];
-          return (
-            <div key={s} style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <div style={{ width: 22, height: 22, borderRadius: "50%", background: pastDone || isFirst ? "#3B6B0F" : isActive ? "#FEF3DC" : "#F5F3EE", border: isActive && !isFirst ? "2px solid #C97A14" : "none", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: pastDone || isFirst ? "#fff" : isActive ? "#C97A14" : "#7A7570" }}>
-                  {pastDone || isFirst ? "✓" : i + 1}
-                </div>
-                {i < arr.length - 1 && <div style={{ width: 2, height: 20, background: pastDone || isFirst ? "#B5D47A" : "#E2DDD6", margin: "2px 0" }} />}
-              </div>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: isActive || pastDone || isFirst ? "#1C1A17" : "#7A7570" }}>{labels[i]}</div>
-                <div style={{ fontSize: 11, color: "#7A7570", marginBottom: 14 }}>
-                  {pastDone || isFirst ? "เสร็จสิ้น" : isActive ? "กำลังดำเนินการ" : "รอดำเนินการ"}
-                </div>
+
+      {/* ── แก้ไขชื่อ ─────────────────────────────────── */}
+      {canEditName && (
+        <div style={{ margin: "0 16px 12px", padding: "12px 14px", border: "1px solid #E2DDD6", borderRadius: 12, background: "#F5F3EE" }}>
+          {editingName ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "#7A7570" }}>แก้ไขชื่อ</label>
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder={order?.customer_name}
+                autoFocus
+                style={{ padding: "10px 12px", border: "1.5px solid #E2DDD6", borderRadius: 10, fontSize: 14, fontFamily: "Sarabun, sans-serif", background: "#fff", outline: "none" }}
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => setEditingName(false)}
+                  style={{ flex: 1, padding: 10, background: "transparent", color: "#7A7570", border: "1px solid #E2DDD6", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  disabled={!newName.trim() || savingName}
+                  onClick={handleSaveName}
+                  style={{ flex: 1, padding: 10, background: newName.trim() ? "#3B6B0F" : "#E2DDD6", color: newName.trim() ? "#fff" : "#7A7570", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: newName.trim() ? "pointer" : "not-allowed", fontFamily: "Sarabun, sans-serif" }}
+                >
+                  {savingName ? "กำลังบันทึก..." : "บันทึก"}
+                </button>
               </div>
             </div>
-          );
-        })}
-      </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: 11, color: "#7A7570", marginBottom: 2 }}>ชื่อผู้สั่ง</div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{order?.customer_name}</div>
+              </div>
+              <button
+                onClick={() => { setNewName(order?.customer_name ?? ""); setEditingName(true); }}
+                style={{ padding: "6px 14px", background: "transparent", color: "#3B6B0F", border: "1px solid #B5D47A", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}
+              >
+                ✏️ แก้ไข
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Progress steps (ซ่อนถ้า cancelled) ─────────── */}
+      {order?.status !== "cancelled" && (
+        <div style={{ padding: "0 28px 16px" }}>
+          {(["new", "cooking", "done"] as const).map((s, i, arr) => {
+            const pastDone = (order?.status === "cooking" && i === 0) || order?.status === "done";
+            const isFirst  = i === 0;
+            const isActive = order?.status === s;
+            const labels   = ["ส่งออร์เดอร์แล้ว", "กำลังปรุงอาหาร", "พร้อมเสิร์ฟ"];
+            return (
+              <div key={s} style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  <div style={{ width: 22, height: 22, borderRadius: "50%", background: pastDone || isFirst ? "#3B6B0F" : isActive ? "#FEF3DC" : "#F5F3EE", border: isActive && !isFirst ? "2px solid #C97A14" : "none", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: pastDone || isFirst ? "#fff" : isActive ? "#C97A14" : "#7A7570" }}>
+                    {pastDone || isFirst ? "✓" : i + 1}
+                  </div>
+                  {i < arr.length - 1 && <div style={{ width: 2, height: 20, background: pastDone || isFirst ? "#B5D47A" : "#E2DDD6", margin: "2px 0" }} />}
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: isActive || pastDone || isFirst ? "#1C1A17" : "#7A7570" }}>{labels[i]}</div>
+                  <div style={{ fontSize: 11, color: "#7A7570", marginBottom: 14 }}>
+                    {pastDone || isFirst ? "เสร็จสิ้น" : isActive ? "กำลังดำเนินการ" : "รอดำเนินการ"}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── รายการที่สั่ง ─────────────────────────────── */}
       <div style={{ margin: "0 16px 16px", border: "1px solid #E2DDD6", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: "8px 14px", background: "#F5F3EE", fontSize: 11, fontWeight: 700, color: "#7A7570", letterSpacing: ".04em", borderBottom: "1px solid #E2DDD6" }}>รายการที่สั่ง</div>
         {order?.items.map((it, i) => (
@@ -348,20 +524,32 @@ function OrderFlow() {
           <span style={{ color: "#3B6B0F" }}>{order?.total} บาท</span>
         </div>
       </div>
-      <div style={{ padding: "0 16px 16px" }}>
-        <p style={{ fontSize: 11, color: "#7A7570", textAlign: "center", marginBottom: 10 }}>ชำระเงินที่เคาน์เตอร์หลังรับอาหาร</p>
+
+      {/* ── ปุ่มล่าง ──────────────────────────────────── */}
+      <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <p style={{ fontSize: 11, color: "#7A7570", textAlign: "center", margin: 0 }}>ชำระเงินที่เคาน์เตอร์หลังรับอาหาร</p>
         <button
-          onClick={() => { setScreen("menu"); setCart({}); setNote(""); setOrder(null); }}
+          onClick={handleReorder}
           style={{ width: "100%", padding: 12, background: "#F5F3EE", color: "#3B6B0F", border: "1px solid #B5D47A", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}
         >
           สั่งอาหารเพิ่ม
         </button>
+        {/* ปุ่มยกเลิก — แสดงเฉพาะตอน status = new */}
+        {canCancel && (
+          <button
+            disabled={cancelling}
+            onClick={handleCancel}
+            style={{ width: "100%", padding: 12, background: cancelling ? "#E2DDD6" : "transparent", color: cancelling ? "#7A7570" : "#C0392B", border: "1px solid #FBBFBF", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: cancelling ? "not-allowed" : "pointer", fontFamily: "Sarabun, sans-serif" }}
+          >
+            {cancelling ? "กำลังยกเลิก..." : "ยกเลิกออเดอร์"}
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-// ── Outer: ห่อ Suspense (required by Next.js 14+ App Router) ──
+// ── Outer ──────────────────────────────────────────────────
 export default function OrderPage() {
   return (
     <Suspense fallback={
