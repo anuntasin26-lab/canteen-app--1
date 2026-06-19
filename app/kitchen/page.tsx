@@ -8,7 +8,8 @@ import {
   updateOrderStatus, deleteOrder,
   subscribeToOrders, supabase,
 } from "@/lib/supabase";
-import type { Order, OrderStatus } from "@/types";
+import type { Order } from "@/types";
+import type { OrderStatus } from "@/types";
 
 // ── PIN ──────────────────────────────────────────────────
 const KITCHEN_PIN = process.env.NEXT_PUBLIC_KITCHEN_PIN ?? "1234"; // เปลี่ยนได้ตามต้องการ

@@ -1,6 +1,7 @@
 // ─── types/index.ts ───────────────────────────────────────
 
-export type OrderStatus = "new" | "cooking" | "done";
+export type OrderStatus = "new" | "cooking" | "done" | "cancelled";
+export default OrderStatus;
 
 export interface Department {
   id: string;
