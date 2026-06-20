@@ -19,7 +19,8 @@ const C = {
   amber: "#C97A14", amberL: "#FEF3DC",
 };
 
-const CATS = ["ทั้งหมด", "ข้าว", "ก๋วยเตี๋ยว", "เครื่องดื่ม"];
+// หมวดหมู่เริ่มต้น (ใช้ตอนเพิ่มเมนูใหม่ ถ้ายังไม่มีหมวดหมู่ใดในระบบเลย)
+const DEFAULT_CATS = ["ข้าว", "ก๋วยเตี๋ยว", "เครื่องดื่ม"];
 
 export default function MenuPage() {
   const [pin,        setPin]        = useState("");
@@ -42,6 +43,8 @@ export default function MenuPage() {
   const [newName,    setNewName]    = useState("");
   const [newPrice,   setNewPrice]   = useState("");
   const [newCat,     setNewCat]     = useState("ข้าว");
+  const [newCatCustom, setNewCatCustom] = useState(false);   // true = กำลังพิมพ์หมวดใหม่เอง
+  const [newCatText,   setNewCatText]   = useState("");      // ข้อความหมวดที่พิมพ์เอง
   const [newEmoji,   setNewEmoji]   = useState("🍽️");
   const [newIng,     setNewIng]     = useState("");
   const [adding,     setAdding]     = useState(false);
@@ -135,18 +138,21 @@ export default function MenuPage() {
     if (!newName.trim()) { alert("กรุณากรอกชื่อเมนู"); return; }
     const p = parseInt(newPrice);
     if (!p || p <= 0) { alert("ราคาไม่ถูกต้อง"); return; }
+    const finalCat = newCatCustom ? newCatText.trim() : newCat;
+    if (!finalCat) { alert("กรุณาเลือกหรือพิมพ์หมวดหมู่"); return; }
     setAdding(true);
     try {
       const created = await createMenuItem({
         name: newName.trim(),
         price: p,
-        category: newCat,
+        category: finalCat,
         emoji: newEmoji,
         ingredients: newIng.trim(),
       });
       setItems(prev => [...prev, created as MenuItem]);
       setShowAdd(false);
       setNewName(""); setNewPrice(""); setNewIng(""); setNewEmoji("🍽️");
+      setNewCatCustom(false); setNewCatText(""); setNewCat("ข้าว");
       showToast(`เพิ่มเมนู "${created.name}" แล้ว`);
     } catch (e: any) {
       alert("เพิ่มเมนูไม่สำเร็จ: " + (e?.message ?? "ไม่ทราบสาเหตุ — ตรวจสอบ RLS policy"));
@@ -185,6 +191,10 @@ export default function MenuPage() {
     } catch { alert("เกิดข้อผิดพลาด"); }
     finally { setAnnSending(false); }
   };
+
+  // หมวดหมู่ทั้งหมด = หมวดเริ่มต้น + หมวดที่มีอยู่จริงในเมนู (ไม่ซ้ำ) เรียงตามตัวอักษร
+  const allCats = Array.from(new Set([...DEFAULT_CATS, ...items.map(m => m.category)])).sort();
+  const CATS = ["ทั้งหมด", ...allCats];
 
   const filtered = cat === "ทั้งหมด" ? items : items.filter(m => m.category === cat);
   const availCount = items.filter(m => m.available).length;
@@ -286,10 +296,26 @@ export default function MenuPage() {
             <div style={{ display: "flex", gap: 8 }}>
               <input type="number" value={newPrice} onChange={e => setNewPrice(e.target.value)} placeholder="ราคา"
                 style={{ flex: 1, padding: "8px 12px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: "Sarabun, sans-serif" }} />
-              <select value={newCat} onChange={e => setNewCat(e.target.value)}
-                style={{ flex: 1, padding: "8px 12px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: "Sarabun, sans-serif" }}>
-                {CATS.filter(c => c !== "ทั้งหมด").map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              {!newCatCustom ? (
+                <select value={newCat} onChange={e => {
+                  if (e.target.value === "__custom__") { setNewCatCustom(true); setNewCatText(""); }
+                  else setNewCat(e.target.value);
+                }}
+                  style={{ flex: 1, padding: "8px 12px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: "Sarabun, sans-serif" }}>
+                  {allCats.map(c => <option key={c} value={c}>{c}</option>)}
+                  <option value="__custom__">+ หมวดใหม่...</option>
+                </select>
+              ) : (
+                <div style={{ flex: 1, display: "flex", gap: 6 }}>
+                  <input value={newCatText} onChange={e => setNewCatText(e.target.value)}
+                    placeholder="พิมพ์ชื่อหมวดใหม่" autoFocus
+                    style={{ flex: 1, padding: "8px 12px", border: `1.5px solid ${C.amber}`, borderRadius: 8, fontSize: 13, fontFamily: "Sarabun, sans-serif" }} />
+                  <button onClick={() => { setNewCatCustom(false); setNewCatText(""); }}
+                    style={{ padding: "0 10px", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, cursor: "pointer", fontSize: 12 }}>
+                    ✕
+                  </button>
+                </div>
+              )}
             </div>
             <input value={newIng} onChange={e => setNewIng(e.target.value)} placeholder="วัตถุดิบ (ถ้ามี)"
               style={{ padding: "8px 12px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: "Sarabun, sans-serif" }} />
@@ -372,7 +398,7 @@ export default function MenuPage() {
                 {deleteConfirm === item.id && (
                   <div style={{ marginTop: 10, padding: "12px", background: C.redL, borderRadius: 10, border: `1px solid #F5B4AE` }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: C.red, marginBottom: 8 }}>
-                      ⚠️ ลบ "{item.name}" ถาวร? ลบแล้วกู้คืนไม่ได้
+                      ⚠️ ลบ &quot;{item.name}&quot; ถาวร? ลบแล้วกู้คืนไม่ได้
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button onClick={() => handleDelete(item)}
