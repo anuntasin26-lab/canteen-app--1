@@ -66,6 +66,7 @@ function OrderFlow() {
 
   // ── ฟีเจอร์ยกเลิก ─────────────────────────────────────
   const [cancelling,   setCancelling]   = useState(false);
+  const [cancelledByKitchen, setCancelledByKitchen] = useState(false); // ครัวยกเลิก
 
   // ── โหลด dept + menu + ตรวจ localStorage ──────────────
   useEffect(() => {
@@ -144,6 +145,28 @@ function OrderFlow() {
         event: "UPDATE", schema: "public", table: "orders",
         filter: `id=eq.${order.id}`,
       }, (payload) => {
+        const newStatus = payload.new?.status;
+        // ถ้าครัวยกเลิก → แจ้งเตือนเสียง + แสดง banner
+        if (newStatus === "cancelled" && order?.status !== "cancelled") {
+          setCancelledByKitchen(true);
+          // เล่นเสียงแจ้งเตือนดังๆ 3 ครั้ง
+          try {
+            const ctx = new AudioContext();
+            const playNote = (freq: number, start: number) => {
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.connect(gain); gain.connect(ctx.destination);
+              osc.frequency.value = freq;
+              gain.gain.setValueAtTime(0.6, ctx.currentTime + start);
+              gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + 0.3);
+              osc.start(ctx.currentTime + start);
+              osc.stop(ctx.currentTime + start + 0.3);
+            };
+            playNote(440, 0); playNote(370, 0.35); playNote(310, 0.7);
+          } catch {}
+          // ล้าง localStorage เพื่อให้สแกนใหม่ได้
+          localStorage.removeItem("petpal_order_id");
+        }
         setOrder((prev) => prev ? { ...prev, ...payload.new } : prev);
       })
       .subscribe();
@@ -462,6 +485,17 @@ function OrderFlow() {
         <div style={{ fontSize: 18, fontWeight: 700 }}>{sm.title}</div>
         <div style={{ fontSize: 13, color: "#7A7570" }}>{sm.sub}</div>
       </div>
+
+      {/* ── Banner แจ้งเตือนถูกครัวยกเลิก ────────────── */}
+      {cancelledByKitchen && (
+        <div style={{ margin: "12px 16px 0", padding: "14px 16px", background: "#FDECEA", border: "1.5px solid #FBBFBF", borderRadius: 14, display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 28 }}>❌</span>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#C0392B" }}>ออร์เดอร์ถูกยกเลิกโดยครัว</div>
+            <div style={{ fontSize: 13, color: "#7A7570", marginTop: 2 }}>กรุณาติดต่อฝ่ายครัวโดยตรง</div>
+          </div>
+        </div>
+      )}
 
       {/* ── แก้ไขชื่อ ─────────────────────────────────── */}
       {canEditName && (
