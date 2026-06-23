@@ -175,6 +175,48 @@ export async function createOrder(payload: {
   return data;
 }
 
+/**
+ * เพิ่มรายการเข้าออร์เดอร์เดิมที่ยังเป็น "new" (ยังไม่เริ่มทำ)
+ * — merge items ที่ id ซ้ำกันให้รวม qty, คำนวณ total ใหม่ทั้งหมด
+ * ใช้แทน createOrder เมื่อกด "สั่งอาหารเพิ่ม" ระหว่างที่ออร์เดอร์เดิมยังรอ
+ */
+export async function addItemsToOrder(
+  orderId: number,
+  newItems: { id: number; name: string; qty: number; price: number }[],
+  extraNote?: string
+) {
+  // ดึงออร์เดอร์เดิมก่อน เพื่อตรวจสถานะและรายการปัจจุบัน
+  const { data: existing, error: fetchErr } = await supabase
+    .from("orders").select("*").eq("id", orderId).single();
+  if (fetchErr) throw fetchErr;
+  if (!existing) throw new Error("ไม่พบออร์เดอร์เดิม");
+  if (existing.status !== "new") {
+    // ออร์เดอร์เดิมเริ่มทำแล้ว ห้ามแก้ของเดิม — โยน error ให้ฝั่ง UI ไป createOrder แทน
+    const e: any = new Error("ORDER_ALREADY_STARTED");
+    e.code = "ORDER_ALREADY_STARTED";
+    throw e;
+  }
+
+  // merge รายการ: ถ้า menu id ซ้ำ ให้รวม qty
+  const merged = [...(existing.items as any[])];
+  for (const ni of newItems) {
+    const found = merged.find(m => m.id === ni.id);
+    if (found) found.qty += ni.qty;
+    else merged.push({ ...ni });
+  }
+  const newTotal = merged.reduce((s, it) => s + it.price * it.qty, 0);
+  const mergedNote = [existing.note, extraNote].filter(Boolean).join(" / ") || null;
+
+  const { data, error } = await supabase
+    .from("orders")
+    .update({ items: merged, total: newTotal, note: mergedNote })
+    .eq("id", orderId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function updateOrderStatus(id: number, status: "cooking" | "done") {
   const extra =
     status === "cooking"

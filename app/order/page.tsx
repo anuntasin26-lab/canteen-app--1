@@ -10,6 +10,7 @@ import {
   getDepartmentById,
   getMenuItems,
   createOrder,
+  addItemsToOrder,
   getTodayAnnouncement,
   subscribeToAnnouncements,
   supabase,
@@ -177,6 +178,29 @@ function OrderFlow() {
       const items: OrderItem[] = cartItems.map((m) => ({
         id: m.id, name: m.name, qty: cart[m.id], price: m.price,
       }));
+
+      // กรณี "สั่งอาหารเพิ่ม": ถ้ามีออร์เดอร์เดิมอยู่ใน state และยังสถานะ "new"
+      // ให้รวมรายการเข้าออร์เดอร์เดิม แทนการสร้างใบใหม่
+      if (order && order.status === "new") {
+        try {
+          const updated = await addItemsToOrder(
+            order.id,
+            items,
+            note.trim() || undefined
+          );
+          setOrder(updated);
+          setScreen("status");
+          setCart({});
+          setNote("");
+          return;
+        } catch (mergeErr: any) {
+          // ออร์เดอร์เดิมเริ่มทำไปแล้วระหว่างที่กำลังเลือกเมนูเพิ่ม
+          // → สร้างออร์เดอร์ใหม่แยกแทน ไม่ block ผู้ใช้
+          if (mergeErr?.code !== "ORDER_ALREADY_STARTED") throw mergeErr;
+        }
+      }
+
+      // กรณีสั่งครั้งแรก หรือออร์เดอร์เดิมเริ่มทำไปแล้ว → สร้างใบใหม่
       const newOrder = await createOrder({
         dept_id: dept.id,
         customer_name: name.trim(),
@@ -184,10 +208,11 @@ function OrderFlow() {
         note: note.trim() || undefined,
         total,
       });
-      // บันทึก orderId ลง localStorage
       localStorage.setItem(LS_ORDER_ID, String(newOrder.id));
       setOrder(newOrder);
       setScreen("status");
+      setCart({});
+      setNote("");
     } catch {
       alert("เกิดข้อผิดพลาด กรุณาลองใหม่");
     } finally {
@@ -241,10 +266,12 @@ function OrderFlow() {
     }
   };
 
-  // ── สั่งใหม่ ───────────────────────────────────────────
+  // ── สั่งเพิ่ม ───────────────────────────────────────────
+  // เก็บออร์เดอร์เดิมไว้ (ไม่ลบ localStorage) เพื่อให้ตอนยืนยัน
+  // รายการใหม่ไปรวมกับออร์เดอร์เดิมที่ยังสถานะ "new"
+  // ถ้าออร์เดอร์เดิมเริ่มทำไปแล้ว (cooking/done) handleConfirm
+  // จะตรวจพบเองและสร้างออร์เดอร์ใหม่แทน
   const handleReorder = () => {
-    localStorage.removeItem(LS_ORDER_ID);
-    setOrder(null);
     setCart({});
     setNote("");
     setScreen("menu");
