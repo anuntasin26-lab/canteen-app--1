@@ -13,6 +13,7 @@ import {
   addItemsToOrder,
   getTodayAnnouncement,
   subscribeToAnnouncements,
+  createCustomOrder,
   supabase,
 } from "@/lib/supabase";
 import type { Department, MenuItem, Order, OrderItem } from "@/types";
@@ -49,7 +50,10 @@ function OrderFlow() {
   const [menuItems,   setMenuItems]   = useState<MenuItem[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState<string | null>(null);
-  const [screen,      setScreen]      = useState<"name"|"menu"|"cart"|"status">("name");
+  const [screen,      setScreen]      = useState<"name"|"menu"|"cart"|"status"|"custom"|"custom_done">("name");
+  const [customItems,  setCustomItems]  = useState("");
+  const [customNote,   setCustomNote]   = useState("");
+  const [customSubmitting, setCustomSubmitting] = useState(false);
   const [name,        setName]        = useState("");
   const [cart,        setCart]        = useState<Record<number, number>>({});
   const [note,        setNote]        = useState("");
@@ -66,7 +70,6 @@ function OrderFlow() {
 
   // ── ฟีเจอร์ยกเลิก ─────────────────────────────────────
   const [cancelling,   setCancelling]   = useState(false);
-  const [cancelledByKitchen, setCancelledByKitchen] = useState(false); // ครัวยกเลิก
 
   // ── โหลด dept + menu + ตรวจ localStorage ──────────────
   useEffect(() => {
@@ -145,28 +148,6 @@ function OrderFlow() {
         event: "UPDATE", schema: "public", table: "orders",
         filter: `id=eq.${order.id}`,
       }, (payload) => {
-        const newStatus = payload.new?.status;
-        // ถ้าครัวยกเลิก → แจ้งเตือนเสียง + แสดง banner
-        if (newStatus === "cancelled" && order?.status !== "cancelled") {
-          setCancelledByKitchen(true);
-          // เล่นเสียงแจ้งเตือนดังๆ 3 ครั้ง
-          try {
-            const ctx = new AudioContext();
-            const playNote = (freq: number, start: number) => {
-              const osc = ctx.createOscillator();
-              const gain = ctx.createGain();
-              osc.connect(gain); gain.connect(ctx.destination);
-              osc.frequency.value = freq;
-              gain.gain.setValueAtTime(0.6, ctx.currentTime + start);
-              gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + 0.3);
-              osc.start(ctx.currentTime + start);
-              osc.stop(ctx.currentTime + start + 0.3);
-            };
-            playNote(440, 0); playNote(370, 0.35); playNote(310, 0.7);
-          } catch {}
-          // ล้าง localStorage เพื่อให้สแกนใหม่ได้
-          localStorage.removeItem("petpal_order_id");
-        }
         setOrder((prev) => prev ? { ...prev, ...payload.new } : prev);
       })
       .subscribe();
@@ -396,7 +377,7 @@ function OrderFlow() {
         {itemCount > 0 && <div style={{ height: 64 }} />}
       </div>
       {itemCount > 0 && (
-        <div onClick={() => setScreen("cart")} style={{ margin: "10px 16px 14px", padding: "14px 16px", background: "#3B6B0F", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+        <div onClick={() => setScreen("cart")} style={{ margin: "10px 16px 0", padding: "14px 16px", background: "#3B6B0F", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
             🛒 ดูตะกร้า
             <span style={{ background: "#fff", color: "#3B6B0F", fontSize: 11, fontWeight: 700, padding: "1px 8px", borderRadius: 10, marginLeft: 8 }}>{itemCount}</span>
@@ -404,6 +385,12 @@ function OrderFlow() {
           <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>{total} บาท</span>
         </div>
       )}
+      {/* ปุ่มสั่งตามสั่ง */}
+      <div style={{ margin: itemCount > 0 ? "8px 16px 14px" : "10px 16px 14px", padding: "13px 16px", background: "#FEF3DC", border: "1.5px solid #F2CD8F", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
+        onClick={() => setScreen("custom")}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: "#A8650E" }}>✏️ สั่งอาหารตามสั่ง</span>
+        <span style={{ fontSize: 13, color: "#A8650E" }}>พิมพ์เองได้ →</span>
+      </div>
     </div>
   );
 
@@ -457,6 +444,85 @@ function OrderFlow() {
     </div>
   );
 
+  // ── CUSTOM ORDER ──────────────────────────────────────
+  if (screen === "custom") return (
+    <div style={S.app}>
+      <div style={S.topbar}>
+        <button onClick={() => setScreen("menu")} style={{ width: 30, height: 30, borderRadius: "50%", border: "1px solid #E2DDD6", background: "#F5F3EE", cursor: "pointer", fontSize: 16 }}>←</button>
+        <div>
+          <div style={S.title}>สั่งตามสั่ง</div>
+          <div style={S.sub}>{name} · แผนก{dept?.name}</div>
+        </div>
+        <span style={S.badge}>{dept?.name}</span>
+      </div>
+      <div style={{ flex: 1, padding: "20px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ padding: "14px 16px", background: "#FEF3DC", borderRadius: 14, fontSize: 13, color: "#A8650E", fontWeight: 600 }}>
+          ✏️ พิมพ์รายการอาหารที่ต้องการ เช่น "ข้าวผัดกระเพราหมูสับไข่ดาว"
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <label style={{ fontSize: 12, fontWeight: 700, color: "#7A7570", letterSpacing: ".04em" }}>รายการอาหาร *</label>
+          <textarea
+            value={customItems}
+            onChange={e => setCustomItems(e.target.value)}
+            placeholder={"เช่น ข้าวผัดกระเพราหมูสับไข่ดาว\nต้มยำกุ้งน้ำข้น 1 ที่\nน้ำเปล่า 1 ขวด"}
+            rows={5}
+            autoFocus
+            style={{ padding: "12px 14px", border: "1.5px solid #F2CD8F", borderRadius: 12, fontSize: 14, fontFamily: "Sarabun, sans-serif", background: "#FFFDF5", resize: "none", outline: "none", lineHeight: 1.7 }}
+          />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <label style={{ fontSize: 12, fontWeight: 700, color: "#7A7570", letterSpacing: ".04em" }}>หมายเหตุ (ถ้ามี)</label>
+          <input
+            value={customNote}
+            onChange={e => setCustomNote(e.target.value)}
+            placeholder="เช่น ไม่เผ็ด, แยกน้ำ"
+            style={{ padding: "12px 14px", border: "1.5px solid #E2DDD6", borderRadius: 12, fontSize: 14, fontFamily: "Sarabun, sans-serif", background: "#F5F3EE", outline: "none" }}
+          />
+        </div>
+        <div style={{ border: "1px solid #E2DDD6", borderRadius: 12, overflow: "hidden" }}>
+          {[["ชื่อผู้สั่ง", name], ["แผนก", dept?.name ?? ""]].map(([label, val], i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "9px 14px", fontSize: 13, borderBottom: i < 1 ? "1px solid #E2DDD6" : "none" }}>
+              <span style={{ color: "#7A7570" }}>{label}</span>
+              <span style={{ color: "#1C1A17", fontWeight: 500 }}>{val}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ padding: "0 16px 16px" }}>
+        <button
+          disabled={!customItems.trim() || customSubmitting}
+          onClick={handleCustomSubmit}
+          style={{ width: "100%", padding: 14, background: customItems.trim() ? "#A8650E" : "#E2DDD6", color: customItems.trim() ? "#fff" : "#7A7570", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: customItems.trim() ? "pointer" : "not-allowed", fontFamily: "Sarabun, sans-serif" }}>
+          {customSubmitting ? "กำลังส่ง..." : "✉️ ส่งรายการให้ครัว"}
+        </button>
+      </div>
+    </div>
+  );
+
+  // ── CUSTOM DONE ────────────────────────────────────────
+  if (screen === "custom_done") return (
+    <div style={S.app}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 24px", gap: 16, textAlign: "center" }}>
+        <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#FEF3DC", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36 }}>✉️</div>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#1C1A17" }}>ส่งรายการให้ครัวแล้ว!</div>
+        <div style={{ fontSize: 14, color: "#7A7570" }}>ครัวจะรับทราบรายการของคุณในไม่ช้า</div>
+        <div style={{ padding: "12px 20px", background: "#F5F3EE", borderRadius: 14, fontSize: 13, color: "#5C5852", textAlign: "left", width: "100%", lineHeight: 1.8 }}>
+          👤 {name} · แผนก{dept?.name}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
+          <button onClick={() => setScreen("custom")}
+            style={{ width: "100%", padding: 13, background: "#A8650E", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
+            ✏️ สั่งเพิ่มอีก
+          </button>
+          <button onClick={() => setScreen("menu")}
+            style={{ width: "100%", padding: 13, background: "#F5F3EE", color: "#3B6B0F", border: "1px solid #B5D47A", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
+            กลับหน้าเมนู
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   // ── STATUS ────────────────────────────────────────────
   const statusMeta = {
     new:       { icon: "📋", title: "ออร์เดอร์ถูกส่งแล้ว", sub: "รอร้านรับออร์เดอร์",     bg: "#EEF2FF" },
@@ -485,17 +551,6 @@ function OrderFlow() {
         <div style={{ fontSize: 18, fontWeight: 700 }}>{sm.title}</div>
         <div style={{ fontSize: 13, color: "#7A7570" }}>{sm.sub}</div>
       </div>
-
-      {/* ── Banner แจ้งเตือนถูกครัวยกเลิก ────────────── */}
-      {cancelledByKitchen && (
-        <div style={{ margin: "12px 16px 0", padding: "14px 16px", background: "#FDECEA", border: "1.5px solid #FBBFBF", borderRadius: 14, display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 28 }}>❌</span>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#C0392B" }}>ออร์เดอร์ถูกยกเลิกโดยครัว</div>
-            <div style={{ fontSize: 13, color: "#7A7570", marginTop: 2 }}>กรุณาติดต่อฝ่ายครัวโดยตรง</div>
-          </div>
-        </div>
-      )}
 
       {/* ── แก้ไขชื่อ ─────────────────────────────────── */}
       {canEditName && (

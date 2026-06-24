@@ -10,7 +10,10 @@ import {
   getMenuItems, toggleMenuItem, updateMenuItem,
   createMenuItem, deleteMenuItem,
   createAnnouncement, subscribeToMenuItems,
+  getTodayCustomOrders, updateCustomOrderStatus, cancelCustomOrder,
+  subscribeToCustomOrders,
 } from "@/lib/supabase";
+import type { CustomOrder } from "@/lib/supabase";
 import type { Order, OrderStatus } from "@/types";
 import type { MenuItem } from "@/types";
 
@@ -69,6 +72,9 @@ export default function KitchenPage() {
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [toast,   setToast]   = useState(false);
   const audioRef = useRef<AudioContext | null>(null);
+
+  // ── Custom Orders state ──────────────────────────────
+  const [customOrders, setCustomOrders] = useState<CustomOrder[]>([]);
 
   // ── Menu state ────────────────────────────────────────
   const [items,      setItems]      = useState<MenuItem[]>([]);
@@ -160,6 +166,27 @@ export default function KitchenPage() {
     return () => clearInterval(t);
   }, []);
 
+  // ── Load custom orders ───────────────────────────────
+  useEffect(() => {
+    if (!unlocked) return;
+    getTodayCustomOrders().then(d => setCustomOrders(d));
+  }, [unlocked]);
+
+  useEffect(() => {
+    if (!unlocked) return;
+    const ch = subscribeToCustomOrders((payload) => {
+      if (payload.eventType === "INSERT") {
+        setCustomOrders(p => [payload.new as CustomOrder, ...p]);
+        setToast(true); setTimeout(() => setToast(false), 3000); playBeep();
+      }
+      if (payload.eventType === "UPDATE")
+        setCustomOrders(p => p.map(o => o.id === payload.new.id ? { ...o, ...payload.new } : o));
+      if (payload.eventType === "DELETE")
+        setCustomOrders(p => p.filter(o => o.id !== payload.old.id));
+    });
+    return () => { supabase.removeChannel(ch); };
+  }, [unlocked]);
+
   // ── Load menu ─────────────────────────────────────────
   useEffect(() => {
     if (!unlocked) return;
@@ -206,6 +233,26 @@ export default function KitchenPage() {
   const total   = activeOrders.length;
   const pending = activeOrders.filter(o => o.status !== "done").length;
   const revenue = activeOrders.reduce((s, o) => s + o.total, 0);
+
+  // ── Custom Order handlers ────────────────────────────
+  const handleCustomMove = async (id: number, status: "cooking" | "done") => {
+    try {
+      await updateCustomOrderStatus(id, status);
+      setCustomOrders(p => p.map(o => o.id === id ? { ...o, status,
+        started_at:   status === "cooking" ? new Date().toISOString() : o.started_at,
+        completed_at: status === "done"    ? new Date().toISOString() : o.completed_at,
+      } : o));
+    } catch { alert("เกิดข้อผิดพลาด"); }
+  };
+
+  const handleCustomCancel = async (id: number) => {
+    if (!window.confirm("ยืนยันยกเลิกรายการตามสั่งนี้?")) return;
+    try {
+      await cancelCustomOrder(id);
+      setCustomOrders(p => p.filter(o => o.id !== id));
+      playAlert();
+    } catch { alert("เกิดข้อผิดพลาด"); }
+  };
 
   // ── Menu handlers ─────────────────────────────────────
   const showMenuToast = (msg: string) => { setMenuToast(msg); setTimeout(() => setMenuToast(""), 2500); };
@@ -381,6 +428,67 @@ export default function KitchenPage() {
       {/* ══════════════ TAB: KANBAN ══════════════ */}
       {tab === "kanban" && (
         <div style={{ padding: "0 14px 28px", display: "flex", flexDirection: "column", gap: 20 }}>
+
+          {/* ── Section: ตามสั่ง ── */}
+          {customOrders.length > 0 && (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 14, marginBottom: 10, background: "#FEF3DC", border: "1.5px solid #F2CD8F" }}>
+                <span style={{ fontSize: 20 }}>✏️</span>
+                <span style={{ fontSize: 17, fontWeight: 800, color: "#A8650E", flex: 1 }}>ตามสั่ง</span>
+                <span style={{ fontSize: 15, fontWeight: 800, background: "#F2CD8F", color: "#A8650E", padding: "4px 14px", borderRadius: 20 }}>{customOrders.length} รายการ</span>
+              </div>
+              {customOrders.map(o => {
+                const CUSTOM_COLS: Record<string, { next: "cooking"|"done"|null, bLabel: string, bBg: string, hC: string, hBg: string }> = {
+                  new:     { next: "cooking", bLabel: "รับออร์เดอร์", bBg: "#A8281F", hC: "#A8281F", hBg: "#FBDCDA" },
+                  cooking: { next: "done",    bLabel: "เสร็จแล้ว",   bBg: "#A8650E", hC: "#A8650E", hBg: "#FCEACB" },
+                  done:    { next: null,       bLabel: "ล้างรายการ",  bBg: "#2D5409", hC: "#2D5409", hBg: "#E5F0D5" },
+                };
+                const col = CUSTOM_COLS[o.status] ?? CUSTOM_COLS.new;
+                return (
+                  <div key={o.id} style={{ borderRadius: 16, marginBottom: 10, background: C.card, overflow: "hidden", border: `1.5px solid #F2CD8F` }}>
+                    <div style={{ padding: "10px 14px", borderBottom: "1px solid #F2CD8F", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#FFFDF5" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, background: "#F2CD8F", color: "#A8650E", padding: "2px 10px", borderRadius: 10 }}>
+                          {o.status === "new" ? "🔔 ใหม่" : o.status === "cooking" ? "👨‍🍳 ปรุง" : "✅ เสร็จ"}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 12, color: C.muted }}>#{String(o.id).padStart(4,"0")}</span>
+                    </div>
+                    <div style={{ padding: "12px 14px" }}>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: C.text, marginBottom: 6 }}>👤 {o.customer_name}</div>
+                      <div style={{ fontSize: 13, color: C.muted, marginBottom: 6 }}>แผนก {o.dept_id}</div>
+                      {/* รายการอาหารที่พิมพ์มา */}
+                      <div style={{ padding: "10px 12px", background: "#FFFDF5", border: "1px solid #F2CD8F", borderRadius: 10, fontSize: 14, color: C.text, lineHeight: 1.8, marginBottom: o.note ? 8 : 12, whiteSpace: "pre-wrap" }}>
+                        {o.items}
+                      </div>
+                      {o.note && <div style={{ fontSize: 13, color: "#A8650E", background: "#FEF3DC", padding: "6px 12px", borderRadius: 8, marginBottom: 12, fontWeight: 600 }}>📝 {o.note}</div>}
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {col.next ? (
+                          <button onClick={() => handleCustomMove(o.id, col.next!)}
+                            style={{ flex: 1, padding: "12px 0", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>
+                            {col.bLabel} →
+                          </button>
+                        ) : (
+                          <button onClick={() => setCustomOrders(p => p.filter(x => x.id !== o.id))}
+                            style={{ flex: 1, padding: "12px 0", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>
+                            {col.bLabel}
+                          </button>
+                        )}
+                        {col.next && (
+                          <button onClick={() => handleCustomCancel(o.id)}
+                            style={{ padding: "12px 16px", border: "1.5px solid #ECA59D", background: "#FEF0EF", borderRadius: 12, cursor: "pointer", fontSize: 14, color: C.red, fontWeight: 700, fontFamily: F }}>
+                            ✕ ยกเลิก
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ── Section: ออเดอร์ปกติ ── */}
           {COLS.map(col => {
             const colOrders = orders.filter(o => o.status === col.status && o.status !== ("cancelled" as any));
             return (

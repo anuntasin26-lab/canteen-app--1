@@ -262,3 +262,91 @@ export function subscribeToMenuItems(callback: (payload: any) => void) {
     )
     .subscribe();
 }
+
+// ── Custom Orders (ตามสั่ง) ───────────────────────────────
+
+export interface CustomOrder {
+  id: number;
+  dept_id: string;
+  customer_name: string;
+  items: string;       // free text เช่น "ข้าวผัดกระเพราหมูสับ x2"
+  note: string | null;
+  status: "new" | "cooking" | "done" | "cancelled";
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+/** พนักงานสั่งอาหารตามสั่ง */
+export async function createCustomOrder(payload: {
+  dept_id: string;
+  customer_name: string;
+  items: string;
+  note?: string;
+}) {
+  const { data, error } = await supabase
+    .from("custom_orders")
+    .insert(payload)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as CustomOrder;
+}
+
+/** ครัวดูออเดอร์ตามสั่งวันนี้ */
+export async function getTodayCustomOrders() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const { data, error } = await supabase
+    .from("custom_orders")
+    .select("*")
+    .gte("created_at", today.toISOString())
+    .neq("status", "cancelled")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data as CustomOrder[];
+}
+
+/** ครัวอัปเดต status ตามสั่ง */
+export async function updateCustomOrderStatus(
+  id: number,
+  status: "cooking" | "done"
+) {
+  const extra = status === "cooking"
+    ? { started_at: new Date().toISOString() }
+    : { completed_at: new Date().toISOString() };
+  const { error } = await supabase
+    .from("custom_orders")
+    .update({ status, ...extra })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+/** ครัวยกเลิกออเดอร์ตามสั่ง */
+export async function cancelCustomOrder(id: number) {
+  const { error } = await supabase
+    .from("custom_orders")
+    .update({ status: "cancelled" })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+/** Realtime สำหรับ custom_orders */
+export function subscribeToCustomOrders(
+  callback: (payload: {
+    eventType: "INSERT" | "UPDATE" | "DELETE";
+    new: any;
+    old: any;
+  }) => void
+) {
+  return supabase
+    .channel("custom-orders-realtime")
+    .on("postgres_changes",
+      { event: "*", schema: "public", table: "custom_orders" },
+      (payload) => callback({
+        eventType: payload.eventType as "INSERT" | "UPDATE" | "DELETE",
+        new: payload.new,
+        old: payload.old,
+      })
+    )
+    .subscribe();
+}
