@@ -21,6 +21,7 @@ import type { Department, MenuItem, Order, OrderItem } from "@/types";
 // ── localStorage keys ─────────────────────────────────────
 const LS_NAME     = "petpal_name";
 const LS_ORDER_ID = "petpal_order_id";
+const LS_SCREEN   = "petpal_screen"; // จำว่าค้างอยู่หน้าไหน (menu/cart/custom) เพื่อ restore ตอน refresh
 
 const S = {
   app: {
@@ -81,6 +82,7 @@ function OrderFlow() {
 
     const savedName    = localStorage.getItem(LS_NAME) ?? "";
     const savedOrderId = localStorage.getItem(LS_ORDER_ID);
+    const savedScreen  = localStorage.getItem(LS_SCREEN); // "menu" | "cart" | "custom" | null
 
     Promise.all([getDepartmentById(deptId), getMenuItems()])
       .then(async ([d, m]) => {
@@ -91,6 +93,8 @@ function OrderFlow() {
         if (savedName) setName(savedName);
 
         // ถ้ามี orderId ค้างไว้ → โหลด order กลับมาแสดงหน้า status
+        // (ลำดับความสำคัญสูงสุด — ออร์เดอร์ที่รออยู่ต้องมาก่อนเสมอ)
+        let restoredToOrder = false;
         if (savedOrderId) {
           try {
             const { data, error: oErr } = await supabase
@@ -111,6 +115,7 @@ function OrderFlow() {
               if (sameDay && data.status !== "cancelled") {
                 setOrder(data);
                 setScreen("status");
+                restoredToOrder = true;
               } else {
                 // order เก่าแล้ว หรือถูกยกเลิกแล้ว → ล้าง
                 localStorage.removeItem(LS_ORDER_ID);
@@ -121,6 +126,13 @@ function OrderFlow() {
           } catch {
             localStorage.removeItem(LS_ORDER_ID);
           }
+        }
+
+        // ไม่มี order ค้าง แต่มีชื่อ + เคยอยู่หน้า menu/cart/custom
+        // → restore กลับไปหน้านั้น ไม่ดีดกลับไปหน้ากรอกชื่อ (fix #2)
+        if (!restoredToOrder && savedName && savedScreen &&
+            (savedScreen === "menu" || savedScreen === "cart" || savedScreen === "custom")) {
+          setScreen(savedScreen);
         }
       })
       .catch(() => setError("โหลดข้อมูลไม่ได้ กรุณาลองใหม่"))
@@ -168,10 +180,40 @@ function OrderFlow() {
       return n;
     });
 
+  // ── ส่งออเดอร์ตามสั่ง ─────────────────────────────────
+  const handleCustomSubmit = async () => {
+    if (!customItems.trim() || !dept || !name.trim()) return;
+    setCustomSubmitting(true);
+    try {
+      await createCustomOrder({
+        dept_id: dept.id,
+        customer_name: name.trim(),
+        items: customItems.trim(),
+        note: customNote.trim() || undefined,
+      });
+      setCustomItems("");
+      setCustomNote("");
+      setScreen("custom_done");
+    } catch {
+      alert("เกิดข้อผิดพลาด กรุณาลองใหม่");
+    } finally {
+      setCustomSubmitting(false);
+    }
+  };
+
   // ── บันทึกชื่อแล้วไปหน้า menu ─────────────────────────
   const handleGoMenu = () => {
     localStorage.setItem(LS_NAME, name.trim());
+    localStorage.setItem(LS_SCREEN, "menu");
     setScreen("menu");
+  };
+
+  // ── ไปหน้าใดก็ได้ที่ "ผ่านขั้นกรอกชื่อแล้ว" พร้อมจำไว้ใน
+  //     localStorage เพื่อ restore ตอน refresh (ปัญหา #2)
+  //     ใช้แทน setScreen("menu"/"cart"/"custom") ตรงๆ ทุกจุด
+  const goTo = (s: "menu" | "cart" | "custom") => {
+    localStorage.setItem(LS_SCREEN, s);
+    setScreen(s);
   };
 
   // ── ยืนยันสั่งอาหาร ────────────────────────────────────
@@ -262,7 +304,7 @@ function OrderFlow() {
       setOrder(null);
       setCart({});
       setNote("");
-      setScreen("menu");
+      goTo("menu");
     } catch {
       alert("ยกเลิกไม่ได้ กรุณาลองใหม่");
     } finally {
@@ -278,7 +320,7 @@ function OrderFlow() {
   const handleReorder = () => {
     setCart({});
     setNote("");
-    setScreen("menu");
+    goTo("menu");
   };
 
   // ── Loading / Error ────────────────────────────────────
@@ -330,7 +372,7 @@ function OrderFlow() {
   if (screen === "menu") return (
     <div style={S.app}>
       <div style={S.topbar}>
-        <button onClick={() => setScreen("name")} style={{ width: 30, height: 30, borderRadius: "50%", border: "1px solid #E2DDD6", background: "#F5F3EE", cursor: "pointer", fontSize: 16 }}>←</button>
+        <button onClick={() => order ? setScreen("status") : (localStorage.removeItem(LS_SCREEN), setScreen("name"))} style={{ width: 30, height: 30, borderRadius: "50%", border: "1px solid #E2DDD6", background: "#F5F3EE", cursor: "pointer", fontSize: 16 }}>←</button>
         <div>
           <div style={S.title}>สวัสดี, {name}</div>
           <div style={S.sub}>แผนก{dept.name}</div>
@@ -377,7 +419,7 @@ function OrderFlow() {
         {itemCount > 0 && <div style={{ height: 64 }} />}
       </div>
       {itemCount > 0 && (
-        <div onClick={() => setScreen("cart")} style={{ margin: "10px 16px 0", padding: "14px 16px", background: "#3B6B0F", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+        <div onClick={() => goTo("cart")} style={{ margin: "10px 16px 0", padding: "14px 16px", background: "#3B6B0F", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
             🛒 ดูตะกร้า
             <span style={{ background: "#fff", color: "#3B6B0F", fontSize: 11, fontWeight: 700, padding: "1px 8px", borderRadius: 10, marginLeft: 8 }}>{itemCount}</span>
@@ -387,7 +429,7 @@ function OrderFlow() {
       )}
       {/* ปุ่มสั่งตามสั่ง */}
       <div style={{ margin: itemCount > 0 ? "8px 16px 14px" : "10px 16px 14px", padding: "13px 16px", background: "#FEF3DC", border: "1.5px solid #F2CD8F", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
-        onClick={() => setScreen("custom")}>
+        onClick={() => goTo("custom")}>
         <span style={{ fontSize: 14, fontWeight: 700, color: "#A8650E" }}>✏️ สั่งอาหารตามสั่ง</span>
         <span style={{ fontSize: 13, color: "#A8650E" }}>พิมพ์เองได้ →</span>
       </div>
@@ -398,7 +440,7 @@ function OrderFlow() {
   if (screen === "cart") return (
     <div style={S.app}>
       <div style={S.topbar}>
-        <button onClick={() => setScreen("menu")} style={{ width: 30, height: 30, borderRadius: "50%", border: "1px solid #E2DDD6", background: "#F5F3EE", cursor: "pointer", fontSize: 16 }}>←</button>
+        <button onClick={() => goTo("menu")} style={{ width: 30, height: 30, borderRadius: "50%", border: "1px solid #E2DDD6", background: "#F5F3EE", cursor: "pointer", fontSize: 16 }}>←</button>
         <div style={S.title}>ตะกร้า</div>
         <div style={{ width: 30 }} />
       </div>
@@ -448,7 +490,7 @@ function OrderFlow() {
   if (screen === "custom") return (
     <div style={S.app}>
       <div style={S.topbar}>
-        <button onClick={() => setScreen("menu")} style={{ width: 30, height: 30, borderRadius: "50%", border: "1px solid #E2DDD6", background: "#F5F3EE", cursor: "pointer", fontSize: 16 }}>←</button>
+        <button onClick={() => goTo("menu")} style={{ width: 30, height: 30, borderRadius: "50%", border: "1px solid #E2DDD6", background: "#F5F3EE", cursor: "pointer", fontSize: 16 }}>←</button>
         <div>
           <div style={S.title}>สั่งตามสั่ง</div>
           <div style={S.sub}>{name} · แผนก{dept?.name}</div>
@@ -510,11 +552,11 @@ function OrderFlow() {
           👤 {name} · แผนก{dept?.name}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
-          <button onClick={() => setScreen("custom")}
+          <button onClick={() => goTo("custom")}
             style={{ width: "100%", padding: 13, background: "#A8650E", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
             ✏️ สั่งเพิ่มอีก
           </button>
-          <button onClick={() => setScreen("menu")}
+          <button onClick={() => goTo("menu")}
             style={{ width: "100%", padding: 13, background: "#F5F3EE", color: "#3B6B0F", border: "1px solid #B5D47A", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
             กลับหน้าเมนู
           </button>
