@@ -21,7 +21,8 @@ import type { Department, MenuItem, Order, OrderItem } from "@/types";
 // ── localStorage keys ─────────────────────────────────────
 const LS_NAME     = "petpal_name";
 const LS_ORDER_ID = "petpal_order_id";
-const LS_SCREEN   = "petpal_screen"; // จำว่าค้างอยู่หน้าไหน (menu/cart/custom) เพื่อ restore ตอน refresh
+const LS_SCREEN        = "petpal_screen";
+const LS_CUSTOM_ORDER  = "petpal_custom_order"; // เก็บ custom order ล่าสุด { items, time } // จำว่าค้างอยู่หน้าไหน (menu/cart/custom) เพื่อ restore ตอน refresh
 
 const S = {
   app: {
@@ -71,6 +72,8 @@ function OrderFlow() {
 
   // ── ฟีเจอร์ยกเลิก ─────────────────────────────────────
   const [cancelling,   setCancelling]   = useState(false);
+  const [showStatusPopup, setShowStatusPopup] = useState(false); // popup ตามสั่ง
+  const [lastCustomOrder, setLastCustomOrder] = useState<{items: string; time: string} | null>(null);
 
   // ── โหลด dept + menu + ตรวจ localStorage ──────────────
   useEffect(() => {
@@ -81,6 +84,11 @@ function OrderFlow() {
     }
 
     const savedName    = localStorage.getItem(LS_NAME) ?? "";
+    // โหลด custom order ล่าสุด
+    try {
+      const saved = localStorage.getItem(LS_CUSTOM_ORDER);
+      if (saved) setLastCustomOrder(JSON.parse(saved));
+    } catch { }
     const savedOrderId = localStorage.getItem(LS_ORDER_ID);
     const savedScreen  = localStorage.getItem(LS_SCREEN); // "menu" | "cart" | "custom" | null
 
@@ -191,6 +199,10 @@ function OrderFlow() {
         items: customItems.trim(),
         note: customNote.trim() || undefined,
       });
+      // บันทึก custom order ล่าสุดลง localStorage
+      const customData = { items: customItems.trim(), time: new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" }) };
+      localStorage.setItem(LS_CUSTOM_ORDER, JSON.stringify(customData));
+      setLastCustomOrder(customData);
       setCustomItems("");
       setCustomNote("");
       setScreen("custom_done");
@@ -371,6 +383,27 @@ function OrderFlow() {
   // ── MENU ──────────────────────────────────────────────
   if (screen === "menu") return (
     <div style={S.app}>
+      {/* ── Floating Status Button ── */}
+      {(order || lastCustomOrder) && (
+        <div style={{ position: "fixed", bottom: 20, right: 16, zIndex: 50, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+          {showStatusPopup && !order && lastCustomOrder && (
+            <div style={{ background: "#fff", border: "1px solid #E2DDD6", borderRadius: 16, padding: "14px 16px", boxShadow: "0 4px 20px rgba(0,0,0,0.12)", maxWidth: 260, textAlign: "left" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#1C1A17", marginBottom: 6 }}>✉️ ตามสั่งล่าสุด</div>
+              <div style={{ fontSize: 12, color: "#7A7570", marginBottom: 8, lineHeight: 1.6 }}>{lastCustomOrder.items}</div>
+              <div style={{ fontSize: 11, color: "#A8650E", fontWeight: 600 }}>ส่งให้ครัวเมื่อ {lastCustomOrder.time} น.</div>
+              <button onClick={() => setShowStatusPopup(false)} style={{ marginTop: 8, width: "100%", padding: "6px", background: "#F5F3EE", border: "1px solid #E2DDD6", borderRadius: 8, fontSize: 12, color: "#7A7570", cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>ปิด</button>
+            </div>
+          )}
+          <button
+            onClick={() => {
+              if (order) setScreen("status");
+              else setShowStatusPopup(p => !p);
+            }}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", background: order ? "#3B6B0F" : "#A8650E", color: "#fff", border: "none", borderRadius: 24, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif", boxShadow: "0 4px 14px rgba(0,0,0,0.2)" }}>
+            {order ? "📋 ดูสถานะ" : "✉️ ดูตามสั่ง"}
+          </button>
+        </div>
+      )}
       <div style={S.topbar}>
         <button onClick={() => order ? setScreen("status") : (localStorage.removeItem(LS_SCREEN), setScreen("name"))} style={{ width: 30, height: 30, borderRadius: "50%", border: "1px solid #E2DDD6", background: "#F5F3EE", cursor: "pointer", fontSize: 16 }}>←</button>
         <div>
@@ -439,6 +472,27 @@ function OrderFlow() {
   // ── CART ──────────────────────────────────────────────
   if (screen === "cart") return (
     <div style={S.app}>
+      {/* ── Floating Status Button ── */}
+      {(order || lastCustomOrder) && (
+        <div style={{ position: "fixed", bottom: 20, right: 16, zIndex: 50, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+          {showStatusPopup && !order && lastCustomOrder && (
+            <div style={{ background: "#fff", border: "1px solid #E2DDD6", borderRadius: 16, padding: "14px 16px", boxShadow: "0 4px 20px rgba(0,0,0,0.12)", maxWidth: 260, textAlign: "left" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#1C1A17", marginBottom: 6 }}>✉️ ตามสั่งล่าสุด</div>
+              <div style={{ fontSize: 12, color: "#7A7570", marginBottom: 8, lineHeight: 1.6 }}>{lastCustomOrder.items}</div>
+              <div style={{ fontSize: 11, color: "#A8650E", fontWeight: 600 }}>ส่งให้ครัวเมื่อ {lastCustomOrder.time} น.</div>
+              <button onClick={() => setShowStatusPopup(false)} style={{ marginTop: 8, width: "100%", padding: "6px", background: "#F5F3EE", border: "1px solid #E2DDD6", borderRadius: 8, fontSize: 12, color: "#7A7570", cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>ปิด</button>
+            </div>
+          )}
+          <button
+            onClick={() => {
+              if (order) setScreen("status");
+              else setShowStatusPopup(p => !p);
+            }}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", background: order ? "#3B6B0F" : "#A8650E", color: "#fff", border: "none", borderRadius: 24, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif", boxShadow: "0 4px 14px rgba(0,0,0,0.2)" }}>
+            {order ? "📋 ดูสถานะ" : "✉️ ดูตามสั่ง"}
+          </button>
+        </div>
+      )}
       <div style={S.topbar}>
         <button onClick={() => goTo("menu")} style={{ width: 30, height: 30, borderRadius: "50%", border: "1px solid #E2DDD6", background: "#F5F3EE", cursor: "pointer", fontSize: 16 }}>←</button>
         <div style={S.title}>ตะกร้า</div>
@@ -489,6 +543,27 @@ function OrderFlow() {
   // ── CUSTOM ORDER ──────────────────────────────────────
   if (screen === "custom") return (
     <div style={S.app}>
+      {/* ── Floating Status Button ── */}
+      {(order || lastCustomOrder) && (
+        <div style={{ position: "fixed", bottom: 20, right: 16, zIndex: 50, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+          {showStatusPopup && !order && lastCustomOrder && (
+            <div style={{ background: "#fff", border: "1px solid #E2DDD6", borderRadius: 16, padding: "14px 16px", boxShadow: "0 4px 20px rgba(0,0,0,0.12)", maxWidth: 260, textAlign: "left" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#1C1A17", marginBottom: 6 }}>✉️ ตามสั่งล่าสุด</div>
+              <div style={{ fontSize: 12, color: "#7A7570", marginBottom: 8, lineHeight: 1.6 }}>{lastCustomOrder.items}</div>
+              <div style={{ fontSize: 11, color: "#A8650E", fontWeight: 600 }}>ส่งให้ครัวเมื่อ {lastCustomOrder.time} น.</div>
+              <button onClick={() => setShowStatusPopup(false)} style={{ marginTop: 8, width: "100%", padding: "6px", background: "#F5F3EE", border: "1px solid #E2DDD6", borderRadius: 8, fontSize: 12, color: "#7A7570", cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>ปิด</button>
+            </div>
+          )}
+          <button
+            onClick={() => {
+              if (order) setScreen("status");
+              else setShowStatusPopup(p => !p);
+            }}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", background: order ? "#3B6B0F" : "#A8650E", color: "#fff", border: "none", borderRadius: 24, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif", boxShadow: "0 4px 14px rgba(0,0,0,0.2)" }}>
+            {order ? "📋 ดูสถานะ" : "✉️ ดูตามสั่ง"}
+          </button>
+        </div>
+      )}
       <div style={S.topbar}>
         <button onClick={() => goTo("menu")} style={{ width: 30, height: 30, borderRadius: "50%", border: "1px solid #E2DDD6", background: "#F5F3EE", cursor: "pointer", fontSize: 16 }}>←</button>
         <div>
@@ -544,6 +619,27 @@ function OrderFlow() {
   // ── CUSTOM DONE ────────────────────────────────────────
   if (screen === "custom_done") return (
     <div style={S.app}>
+      {/* ── Floating Status Button ── */}
+      {(order || lastCustomOrder) && (
+        <div style={{ position: "fixed", bottom: 20, right: 16, zIndex: 50, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+          {showStatusPopup && !order && lastCustomOrder && (
+            <div style={{ background: "#fff", border: "1px solid #E2DDD6", borderRadius: 16, padding: "14px 16px", boxShadow: "0 4px 20px rgba(0,0,0,0.12)", maxWidth: 260, textAlign: "left" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#1C1A17", marginBottom: 6 }}>✉️ ตามสั่งล่าสุด</div>
+              <div style={{ fontSize: 12, color: "#7A7570", marginBottom: 8, lineHeight: 1.6 }}>{lastCustomOrder.items}</div>
+              <div style={{ fontSize: 11, color: "#A8650E", fontWeight: 600 }}>ส่งให้ครัวเมื่อ {lastCustomOrder.time} น.</div>
+              <button onClick={() => setShowStatusPopup(false)} style={{ marginTop: 8, width: "100%", padding: "6px", background: "#F5F3EE", border: "1px solid #E2DDD6", borderRadius: 8, fontSize: 12, color: "#7A7570", cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>ปิด</button>
+            </div>
+          )}
+          <button
+            onClick={() => {
+              if (order) setScreen("status");
+              else setShowStatusPopup(p => !p);
+            }}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", background: order ? "#3B6B0F" : "#A8650E", color: "#fff", border: "none", borderRadius: 24, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif", boxShadow: "0 4px 14px rgba(0,0,0,0.2)" }}>
+            {order ? "📋 ดูสถานะ" : "✉️ ดูตามสั่ง"}
+          </button>
+        </div>
+      )}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 24px", gap: 16, textAlign: "center" }}>
         <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#FEF3DC", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36 }}>✉️</div>
         <div style={{ fontSize: 22, fontWeight: 700, color: "#1C1A17" }}>ส่งรายการให้ครัวแล้ว!</div>
@@ -556,6 +652,12 @@ function OrderFlow() {
             style={{ width: "100%", padding: 13, background: "#A8650E", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
             ✏️ สั่งเพิ่มอีก
           </button>
+          {order && (
+            <button onClick={() => setScreen("status")}
+              style={{ width: "100%", padding: 13, background: "#3B6B0F", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
+              📋 ดูสถานะออเดอร์หลัก
+            </button>
+          )}
           <button onClick={() => goTo("menu")}
             style={{ width: "100%", padding: 13, background: "#F5F3EE", color: "#3B6B0F", border: "1px solid #B5D47A", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
             กลับหน้าเมนู
