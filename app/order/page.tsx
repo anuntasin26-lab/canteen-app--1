@@ -211,8 +211,16 @@ function OrderFlow() {
     }
   };
 
+  // ── เลือกแผนก (กรณีไม่มี dept ใน URL) ───────────────────────────────
+  const handleSelectDept = (dId: string) => {
+    setSelectedDeptId(dId);
+    const found = departments.find(d => d.id === dId);
+    if (found) setDept(found as Department);
+  };
+
   // ── บันทึกชื่อแล้วไปหน้า menu ─────────────────────────
   const handleGoMenu = () => {
+    if (!deptId && !dept) { alert("กรุณาเลือกแผนกก่อน"); return; }
     localStorage.setItem(LS_NAME, name.trim());
     localStorage.setItem(LS_SCREEN, "menu");
     setScreen("menu");
