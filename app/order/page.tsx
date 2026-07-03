@@ -339,9 +339,15 @@ function OrderFlow() {
       <p style={{ color: "#7A7570" }}>กำลังโหลด...</p>
     </div>
   );
-  if (error || !dept) return (
+  // ถ้าไม่มี deptId ใน URL = user ยังไม่ได้เลือกแผนก → ไม่ error แค่รอ
+  if (error) return (
     <div style={{ ...S.app, alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <p style={{ color: "#C0392B", textAlign: "center" }}>{error ?? "ไม่พบข้อมูลแผนก"}</p>
+      <p style={{ color: "#C0392B", textAlign: "center" }}>{error}</p>
+    </div>
+  );
+  if (!dept && deptId) return (
+    <div style={{ ...S.app, alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <p style={{ color: "#C0392B", textAlign: "center" }}>ไม่พบข้อมูลแผนก</p>
     </div>
   );
 
