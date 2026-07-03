@@ -14,6 +14,14 @@ export async function getDepartmentById(id: string) {
   return data;
 }
 
+/** ดึงแผนกทั้งหมด — สำหรับ dropdown เลือกแผนกในหน้าสั่งอาหาร */
+export async function getAllDepartments() {
+  const { data, error } = await supabase
+    .from("departments").select("*").eq("active", true).order("name");
+  if (error) throw error;
+  return data;
+}
+
 // ── Menu Items ────────────────────────────────────────────
 export async function getMenuItems() {
   const { data, error } = await supabase
