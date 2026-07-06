@@ -71,6 +71,12 @@ export default function KitchenPage() {
   const [hdays,   setHdays]   = useState(1);
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [toast,   setToast]   = useState(false);
+  const [clearedIds, setClearedIds] = useState<Set<number>>(() => {
+    try {
+      const saved = localStorage.getItem("kitchen_cleared_ids");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
   const audioRef = useRef<AudioContext | null>(null);
 
   // ── Custom Orders state ──────────────────────────────
@@ -135,7 +141,15 @@ export default function KitchenPage() {
   // ── Load orders ───────────────────────────────────────
   useEffect(() => {
     if (!unlocked) return;
-    getTodayOrders().then(d => setOrders(d as Order[])).finally(() => setLoadingOrders(false));
+    getTodayOrders().then(d => {
+      const cleared = (() => {
+        try {
+          const saved = localStorage.getItem("kitchen_cleared_ids");
+          return saved ? new Set<number>(JSON.parse(saved)) : new Set<number>();
+        } catch { return new Set<number>(); }
+      })();
+      setOrders((d as Order[]).filter(o => !cleared.has(o.id)));
+    }).finally(() => setLoadingOrders(false));
   }, [unlocked]);
 
   useEffect(() => {
@@ -224,9 +238,14 @@ export default function KitchenPage() {
     } catch { alert("เกิดข้อผิดพลาด"); }
   };
 
-  const handleClearDone = async (id: number) => {
-    try { await deleteOrder(id); setOrders(p => p.filter(o => o.id !== id)); }
-    catch { alert("เกิดข้อผิดพลาด"); }
+  const handleClearDone = (id: number) => {
+    setClearedIds(prev => {
+      const next = new Set(prev);
+      next.add(id);
+      localStorage.setItem("kitchen_cleared_ids", JSON.stringify([...next]));
+      return next;
+    });
+    setOrders(p => p.filter(o => o.id !== id));
   };
 
   const activeOrders = orders.filter(o => o.status !== ("cancelled" as any));
