@@ -79,11 +79,51 @@ function OrderFlow() {
   useEffect(() => {
     // รองรับทั้ง URL เดิม (?dept=xxx) และ URL ใหม่ (ไม่มี dept)
     if (!deptId) {
-      // โหลดรายชื่อแผนกทั้งหมด ให้ user เลือกเอง
+      const savedName    = localStorage.getItem(LS_NAME) ?? "";
+      const savedOrderId = localStorage.getItem(LS_ORDER_ID);
+      const savedScreen  = localStorage.getItem(LS_SCREEN);
+      const savedDeptId  = localStorage.getItem("petpal_dept_id");
+
       Promise.all([getAllDepartments(), getMenuItems()])
-        .then(([depts, m]) => {
-          setDepartments(depts as Department[]);
+        .then(async ([depts, m]) => {
+          const deptsTyped = depts as Department[];
+          setDepartments(deptsTyped);
           setMenuItems(m as MenuItem[]);
+
+          // restore ชื่อ
+          if (savedName) setName(savedName);
+
+          // restore แผนกที่เคยเลือก
+          if (savedDeptId) {
+            const found = deptsTyped.find(d => d.id === savedDeptId);
+            if (found) { setDept(found); setSelectedDeptId(savedDeptId); }
+          }
+
+          // restore order ถ้ามี
+          let restoredToOrder = false;
+          if (savedOrderId) {
+            try {
+              const { data, error: oErr } = await supabase
+                .from("orders").select("*").eq("id", Number(savedOrderId)).single();
+              if (!oErr && data) {
+                const orderDate = new Date(data.created_at);
+                const today = new Date();
+                const sameDay =
+                  orderDate.getFullYear() === today.getFullYear() &&
+                  orderDate.getMonth()    === today.getMonth()    &&
+                  orderDate.getDate()     === today.getDate();
+                if (sameDay && data.status !== "cancelled") {
+                  setOrder(data); setScreen("status"); restoredToOrder = true;
+                } else { localStorage.removeItem(LS_ORDER_ID); }
+              } else { localStorage.removeItem(LS_ORDER_ID); }
+            } catch { localStorage.removeItem(LS_ORDER_ID); }
+          }
+
+          // restore screen
+          if (!restoredToOrder && savedName && savedDeptId && savedScreen &&
+              ["menu","cart","custom"].includes(savedScreen)) {
+            setScreen(savedScreen as any);
+          }
         })
         .catch(() => setError("โหลดข้อมูลไม่ได้ กรุณาลองใหม่"))
         .finally(() => setLoading(false));
@@ -215,7 +255,10 @@ function OrderFlow() {
   const handleSelectDept = (dId: string) => {
     setSelectedDeptId(dId);
     const found = departments.find(d => d.id === dId);
-    if (found) setDept(found as Department);
+    if (found) {
+      setDept(found as Department);
+      localStorage.setItem("petpal_dept_id", dId); // จำแผนกที่เลือกไว้
+    }
   };
 
   // ── บันทึกชื่อแล้วไปหน้า menu ─────────────────────────
