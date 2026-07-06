@@ -183,7 +183,16 @@ export default function KitchenPage() {
   // ── Load custom orders ───────────────────────────────
   useEffect(() => {
     if (!unlocked) return;
-    getTodayCustomOrders().then(d => setCustomOrders(d));
+    getTodayCustomOrders().then(d => {
+      const cleared = (() => {
+        try {
+          const saved = localStorage.getItem("kitchen_cleared_ids");
+          return saved ? new Set<number>(JSON.parse(saved)) : new Set<number>();
+        } catch { return new Set<number>(); }
+      })();
+      // negative ID สำหรับ custom orders
+      setCustomOrders(d.filter(o => !cleared.has(-o.id)));
+    });
   }, [unlocked]);
 
   useEffect(() => {
@@ -488,7 +497,15 @@ export default function KitchenPage() {
                             {col.bLabel} →
                           </button>
                         ) : (
-                          <button onClick={() => setCustomOrders(p => p.filter(x => x.id !== o.id))}
+                          <button onClick={() => {
+                            setClearedIds(prev => {
+                              const next = new Set(prev);
+                              next.add(-o.id); // ใช้ negative ID เพื่อแยกจาก orders ปกติ
+                              localStorage.setItem("kitchen_cleared_ids", JSON.stringify([...next]));
+                              return next;
+                            });
+                            setCustomOrders(p => p.filter(x => x.id !== o.id));
+                          }}
                             style={{ flex: 1, padding: "12px 0", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>
                             {col.bLabel}
                           </button>
