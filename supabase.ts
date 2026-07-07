@@ -1,0 +1,401 @@
+// ─── lib/supabase.ts ──────────────────────────────────────
+import { createClient } from "@supabase/supabase-js";
+
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+export const supabase = createClient(url, key);
+
+// ── Departments ───────────────────────────────────────────
+export async function getDepartmentById(id: string) {
+  const { data, error } = await supabase
+    .from("departments").select("*").eq("id", id).single();
+  if (error) throw error;
+  return data;
+}
+
+/** ดึงแผนกทั้งหมด — สำหรับ dropdown เลือกแผนกในหน้าสั่งอาหาร */
+export async function getAllDepartments() {
+  const { data, error } = await supabase
+    .from("departments").select("*").eq("active", true).order("name");
+  if (error) throw error;
+  return data;
+}
+
+// ── Menu Items ────────────────────────────────────────────
+export async function getMenuItems() {
+  const { data, error } = await supabase
+    .from("menu_items").select("*").order("sort_order");
+  if (error) throw error;
+  return data;
+}
+
+/** ครัวเปิด/ปิดเมนู */
+export async function toggleMenuItem(id: number, available: boolean) {
+  const { error } = await supabase
+    .from("menu_items").update({ available }).eq("id", id);
+  if (error) throw error;
+}
+
+/** ครัวแก้ไขเมนู: ชื่อ, ราคา, วัตถุดิบ — แล้วบันทึก log อัตโนมัติ */
+export async function updateMenuItem(id: number, fields: {
+  name?: string;
+  price?: number;
+  ingredients?: string;
+  image_url?: string | null;
+}) {
+  const { error } = await supabase
+    .from("menu_items").update(fields).eq("id", id);
+  if (error) throw error;
+
+  const { data: item } = await supabase
+    .from("menu_items").select("*").eq("id", id).single();
+  if (item) {
+    await supabase.from("menu_history_log").insert({
+      menu_id: id,
+      name: item.name,
+      price: item.price,
+      available: item.available,
+    });
+  }
+}
+
+/** ครัวเพิ่มเมนูใหม่ */
+export async function createMenuItem(fields: {
+  name: string;
+  price: number;
+  category: string;
+  emoji?: string;
+  ingredients?: string;
+  image_url?: string | null;
+}) {
+  const { data, error } = await supabase
+    .from("menu_items")
+    .insert({ ...fields, available: true, sort_order: 999 })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** ครัวลบเมนู */
+export async function deleteMenuItem(id: number) {
+  const { error } = await supabase
+    .from("menu_items").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ── Menu Images (Supabase Storage) ─────────────────────────
+// ต้องสร้าง bucket ชื่อ "menu-images" แบบ Public ใน Supabase Dashboard
+// (Storage → New bucket → ตั้งชื่อ "menu-images" → เปิด Public bucket)
+// ดูขั้นตอนเต็มในไฟล์ menu_images_setup.sql
+
+const MENU_IMAGE_BUCKET = "menu-images";
+const MAX_MENU_IMAGE_MB = 5;
+
+/** อัปโหลดรูปเมนู แล้วคืน public URL — ใช้ตอนเพิ่ม/แก้ไขเมนู */
+export async function uploadMenuImage(file: File, menuId?: number) {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("ไฟล์ต้องเป็นรูปภาพเท่านั้น");
+  }
+  if (file.size > MAX_MENU_IMAGE_MB * 1024 * 1024) {
+    throw new Error(`รูปต้องมีขนาดไม่เกิน ${MAX_MENU_IMAGE_MB}MB`);
+  }
+  const ext = file.name.split(".").pop() || "jpg";
+  const path = `${menuId ?? "new"}-${Date.now()}.${ext}`;
+
+  const { error: uploadError } = await supabase
+    .storage.from(MENU_IMAGE_BUCKET)
+    .upload(path, file, { upsert: true, cacheControl: "3600" });
+  if (uploadError) throw uploadError;
+
+  const { data } = supabase.storage.from(MENU_IMAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl as string;
+}
+
+/** ลบรูปเมนูเก่าออกจาก storage (เรียกตอนเปลี่ยนรูปใหม่ หรือลบเมนู) */
+export async function deleteMenuImage(imageUrl: string) {
+  try {
+    const path = imageUrl.split(`${MENU_IMAGE_BUCKET}/`).pop();
+    if (!path) return;
+    await supabase.storage.from(MENU_IMAGE_BUCKET).remove([path]);
+  } catch {
+    // ไม่ต้อง throw — ลบรูปเก่าไม่สำเร็จไม่ควรบล็อกการทำงานหลัก
+  }
+}
+
+// ── Announcements ────────────────────────────────────────
+/** ครัวประกาศแจ้งเตือนถึงทุก user */
+export async function createAnnouncement(message: string) {
+  const { error } = await supabase
+    .from("announcements").insert({ message });
+  if (error) throw error;
+}
+
+/** ดึงประกาศล่าสุดของวันนี้ (ลูกค้าใช้แสดง banner) */
+export async function getTodayAnnouncement() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const { data, error } = await supabase
+    .from("announcements")
+    .select("*")
+    .gte("created_at", today.toISOString())
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return data?.[0] ?? null;
+}
+
+export function subscribeToAnnouncements(callback: (payload: any) => void) {
+  return supabase
+    .channel("announcements-realtime")
+    .on("postgres_changes",
+      { event: "INSERT", schema: "public", table: "announcements" },
+      callback
+    )
+    .subscribe();
+}
+
+// ── Menu History ──────────────────────────────────────────
+/** ดูเมนูย้อนหลังตามวัน */
+export async function getMenuHistory(days = 7) {
+  const from = new Date();
+  from.setDate(from.getDate() - days);
+  from.setHours(0, 0, 0, 0);
+  const { data, error } = await supabase
+    .from("menu_history_log")
+    .select("*")
+    .gte("created_at", from.toISOString())
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+// ── Orders ────────────────────────────────────────────────
+export async function getTodayOrders() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*, departments(id, name)")
+    .gte("created_at", today.toISOString())
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+export async function getOrderHistory(days = 7) {
+  const from = new Date();
+  from.setDate(from.getDate() - days);
+  from.setHours(0, 0, 0, 0);
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*, departments(id, name)")
+    .gte("created_at", from.toISOString())
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+export async function getDeptHistory(deptId: string, days = 7) {
+  const from = new Date();
+  from.setDate(from.getDate() - days);
+  from.setHours(0, 0, 0, 0);
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("dept_id", deptId)
+    .gte("created_at", from.toISOString())
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+export async function createOrder(payload: {
+  dept_id: string;
+  customer_name: string;
+  items: { id: number; name: string; qty: number; price: number }[];
+  note?: string;
+  total: number;
+}) {
+  const { data, error } = await supabase
+    .from("orders").insert(payload).select().single();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * เพิ่มรายการเข้าออร์เดอร์เดิมที่ยังเป็น "new" (ยังไม่เริ่มทำ)
+ * — merge items ที่ id ซ้ำกันให้รวม qty, คำนวณ total ใหม่ทั้งหมด
+ * ใช้แทน createOrder เมื่อกด "สั่งอาหารเพิ่ม" ระหว่างที่ออร์เดอร์เดิมยังรอ
+ */
+export async function addItemsToOrder(
+  orderId: number,
+  newItems: { id: number; name: string; qty: number; price: number }[],
+  extraNote?: string
+) {
+  // ดึงออร์เดอร์เดิมก่อน เพื่อตรวจสถานะและรายการปัจจุบัน
+  const { data: existing, error: fetchErr } = await supabase
+    .from("orders").select("*").eq("id", orderId).single();
+  if (fetchErr) throw fetchErr;
+  if (!existing) throw new Error("ไม่พบออร์เดอร์เดิม");
+  if (existing.status !== "new") {
+    // ออร์เดอร์เดิมเริ่มทำแล้ว ห้ามแก้ของเดิม — โยน error ให้ฝั่ง UI ไป createOrder แทน
+    const e: any = new Error("ORDER_ALREADY_STARTED");
+    e.code = "ORDER_ALREADY_STARTED";
+    throw e;
+  }
+
+  // merge รายการ: ถ้า menu id ซ้ำ ให้รวม qty
+  const merged = [...(existing.items as any[])];
+  for (const ni of newItems) {
+    const found = merged.find(m => m.id === ni.id);
+    if (found) found.qty += ni.qty;
+    else merged.push({ ...ni });
+  }
+  const newTotal = merged.reduce((s, it) => s + it.price * it.qty, 0);
+  const mergedNote = [existing.note, extraNote].filter(Boolean).join(" / ") || null;
+
+  const { data, error } = await supabase
+    .from("orders")
+    .update({ items: merged, total: newTotal, note: mergedNote })
+    .eq("id", orderId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateOrderStatus(id: number, status: "cooking" | "done") {
+  const extra =
+    status === "cooking"
+      ? { started_at: new Date().toISOString() }
+      : { completed_at: new Date().toISOString() };
+  const { error } = await supabase
+    .from("orders").update({ status, ...extra }).eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteOrder(id: number) {
+  const { error } = await supabase.from("orders").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ── Realtime ──────────────────────────────────────────────
+export function subscribeToOrders(
+  callback: (payload: {
+    eventType: "INSERT" | "UPDATE" | "DELETE";
+    new: any;
+    old: any;
+  }) => void
+) {
+  return supabase
+    .channel("orders-realtime")
+    .on("postgres_changes",
+      { event: "*", schema: "public", table: "orders" },
+      (payload) => callback({
+        eventType: payload.eventType as "INSERT" | "UPDATE" | "DELETE",
+        new: payload.new,
+        old: payload.old,
+      })
+    )
+    .subscribe();
+}
+
+export function subscribeToMenuItems(callback: (payload: any) => void) {
+  return supabase
+    .channel("menu-realtime")
+    .on("postgres_changes",
+      { event: "*", schema: "public", table: "menu_items" },
+      callback
+    )
+    .subscribe();
+}
+
+// ── Custom Orders (ตามสั่ง) ───────────────────────────────
+
+export interface CustomOrder {
+  id: number;
+  dept_id: string;
+  customer_name: string;
+  items: string;       // free text เช่น "ข้าวผัดกระเพราหมูสับ x2"
+  note: string | null;
+  status: "new" | "cooking" | "done" | "cancelled";
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+/** พนักงานสั่งอาหารตามสั่ง */
+export async function createCustomOrder(payload: {
+  dept_id: string;
+  customer_name: string;
+  items: string;
+  note?: string;
+}) {
+  const { data, error } = await supabase
+    .from("custom_orders")
+    .insert(payload)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as CustomOrder;
+}
+
+/** ครัวดูออเดอร์ตามสั่งวันนี้ */
+export async function getTodayCustomOrders() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const { data, error } = await supabase
+    .from("custom_orders")
+    .select("*")
+    .gte("created_at", today.toISOString())
+    .neq("status", "cancelled")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data as CustomOrder[];
+}
+
+/** ครัวอัปเดต status ตามสั่ง */
+export async function updateCustomOrderStatus(
+  id: number,
+  status: "cooking" | "done"
+) {
+  const extra = status === "cooking"
+    ? { started_at: new Date().toISOString() }
+    : { completed_at: new Date().toISOString() };
+  const { error } = await supabase
+    .from("custom_orders")
+    .update({ status, ...extra })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+/** ครัวยกเลิกออเดอร์ตามสั่ง */
+export async function cancelCustomOrder(id: number) {
+  const { error } = await supabase
+    .from("custom_orders")
+    .update({ status: "cancelled" })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+/** Realtime สำหรับ custom_orders */
+export function subscribeToCustomOrders(
+  callback: (payload: {
+    eventType: "INSERT" | "UPDATE" | "DELETE";
+    new: any;
+    old: any;
+  }) => void
+) {
+  return supabase
+    .channel("custom-orders-realtime")
+    .on("postgres_changes",
+      { event: "*", schema: "public", table: "custom_orders" },
+      (payload) => callback({
+        eventType: payload.eventType as "INSERT" | "UPDATE" | "DELETE",
+        new: payload.new,
+        old: payload.old,
+      })
+    )
+    .subscribe();
+}
