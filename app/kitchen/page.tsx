@@ -13,6 +13,7 @@ import {
   createAnnouncement, subscribeToMenuItems,
   getTodayCustomOrders, updateCustomOrderStatus, cancelCustomOrder,
   subscribeToCustomOrders,
+  uploadMenuImage, deleteMenuImage,
 } from "@/lib/supabase";
 import type { CustomOrder } from "@/lib/supabase";
 import type { Order, OrderStatus } from "@/types";
@@ -108,6 +109,8 @@ export default function KitchenPage() {
   const [editName,   setEditName]   = useState("");
   const [editPrice,  setEditPrice]  = useState("");
   const [editIng,    setEditIng]    = useState("");
+  const [editImageFile,    setEditImageFile]    = useState<File | null>(null);
+  const [editImagePreview, setEditImagePreview] = useState<string | null>(null);
   const [saving,     setSaving]     = useState<number | null>(null);
   const [menuToast,  setMenuToast]  = useState("");
   const [annText,    setAnnText]    = useState("");
@@ -121,6 +124,9 @@ export default function KitchenPage() {
   const [newCatText,   setNewCatText]   = useState("");
   const [newEmoji,   setNewEmoji]   = useState("🍽️");
   const [newIng,     setNewIng]     = useState("");
+  const [newImageFile,    setNewImageFile]    = useState<File | null>(null);
+  const [newImagePreview, setNewImagePreview] = useState<string | null>(null);
+  const [imgUploading, setImgUploading] = useState(false);
   const [adding,     setAdding]     = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
@@ -316,6 +322,7 @@ export default function KitchenPage() {
   const openEdit = (item: MenuItem) => {
     setEditing(item.id); setEditName(item.name);
     setEditPrice(String(item.price)); setEditIng((item as any).ingredients ?? "");
+    setEditImageFile(null); setEditImagePreview((item as any).image_url ?? null);
   };
 
   const handleSave = async (item: MenuItem) => {
@@ -324,10 +331,19 @@ export default function KitchenPage() {
     if (!p || p <= 0) { alert("ราคาไม่ถูกต้อง"); return; }
     setSaving(item.id);
     try {
-      await updateMenuItem(item.id, { name: editName.trim(), price: p, ingredients: editIng.trim() });
-      setItems(prev => prev.map(m => m.id === item.id ? { ...m, name: editName.trim(), price: p, ingredients: editIng.trim() } as any : m));
-      setEditing(null); showMenuToast(`อัปเดต "${editName.trim()}" แล้ว`);
-    } catch (e: any) { alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "")); }
+      let image_url = (item as any).image_url ?? null;
+      if (editImageFile) {
+        setImgUploading(true);
+        const uploaded = await uploadMenuImage(editImageFile, item.id);
+        if (image_url) deleteMenuImage(image_url); // ลบรูปเก่าแบบ fire-and-forget
+        image_url = uploaded;
+        setImgUploading(false);
+      }
+      await updateMenuItem(item.id, { name: editName.trim(), price: p, ingredients: editIng.trim(), image_url });
+      setItems(prev => prev.map(m => m.id === item.id ? { ...m, name: editName.trim(), price: p, ingredients: editIng.trim(), image_url } as any : m));
+      setEditing(null); setEditImageFile(null); setEditImagePreview(null);
+      showMenuToast(`อัปเดต "${editName.trim()}" แล้ว`);
+    } catch (e: any) { alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "")); setImgUploading(false); }
     finally { setSaving(null); }
   };
 
@@ -339,19 +355,27 @@ export default function KitchenPage() {
     if (!finalCat) { alert("กรุณาเลือกหรือพิมพ์หมวดหมู่"); return; }
     setAdding(true);
     try {
-      const created = await createMenuItem({ name: newName.trim(), price: p, category: finalCat, emoji: newEmoji, ingredients: newIng.trim() });
+      let image_url: string | null = null;
+      if (newImageFile) {
+        setImgUploading(true);
+        image_url = await uploadMenuImage(newImageFile);
+        setImgUploading(false);
+      }
+      const created = await createMenuItem({ name: newName.trim(), price: p, category: finalCat, emoji: newEmoji, ingredients: newIng.trim(), image_url });
       setItems(prev => [...prev, created as MenuItem]);
       setShowAdd(false);
       setNewName(""); setNewPrice(""); setNewIng(""); setNewEmoji("🍽️");
       setNewCatCustom(false); setNewCatText(""); setNewCat("ข้าว");
+      setNewImageFile(null); setNewImagePreview(null);
       showMenuToast(`เพิ่มเมนู "${created.name}" แล้ว`);
-    } catch (e: any) { alert("เพิ่มเมนูไม่สำเร็จ: " + (e?.message ?? "")); }
+    } catch (e: any) { alert("เพิ่มเมนูไม่สำเร็จ: " + (e?.message ?? "")); setImgUploading(false); }
     finally { setAdding(false); }
   };
 
   const handleDeleteMenu = async (item: MenuItem) => {
     try {
       await deleteMenuItem(item.id);
+      if ((item as any).image_url) deleteMenuImage((item as any).image_url);
       setItems(prev => prev.filter(m => m.id !== item.id));
       setDeleteConfirm(null); showMenuToast(`ลบ "${item.name}" แล้ว`);
     } catch (e: any) { alert("ลบไม่สำเร็จ: " + (e?.message ?? "")); }
@@ -645,6 +669,30 @@ export default function KitchenPage() {
             <div style={{ margin: "0 16px 12px", padding: "14px", background: C.card, border: `1px solid ${C.amberBorder}`, borderRadius: 14 }}>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10, color: C.text }}>🍽️ เมนูใหม่</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {/* รูปเมนู */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <label style={{ width: 64, height: 64, borderRadius: 12, background: C.card2, border: `1px dashed ${C.borderStrong}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer", overflow: "hidden", position: "relative" }}>
+                    {newImagePreview ? (
+                      <img src={newImagePreview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (
+                      <span style={{ fontSize: 22, color: C.muted }}>📷</span>
+                    )}
+                    <input type="file" accept="image/*" style={{ display: "none" }}
+                      onChange={e => {
+                        const f = e.target.files?.[0]; if (!f) return;
+                        setNewImageFile(f); setNewImagePreview(URL.createObjectURL(f));
+                      }} />
+                  </label>
+                  <div style={{ flex: 1, fontSize: 12, color: C.muted }}>
+                    แตะเพื่อเพิ่มรูปเมนู <span style={{ color: C.muted }}>(ไม่บังคับ — ไม่ใส่จะใช้อีโมจิแทน)</span>
+                    {newImagePreview && (
+                      <div>
+                        <button type="button" onClick={() => { setNewImageFile(null); setNewImagePreview(null); }}
+                          style={{ marginTop: 4, background: "transparent", border: "none", color: C.red, fontSize: 12, cursor: "pointer", padding: 0, fontFamily: F }}>✕ เอารูปออก</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <input value={newEmoji} onChange={e => setNewEmoji(e.target.value)} placeholder="🍽️" style={{ width: 50, padding: "8px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 16, textAlign: "center", fontFamily: F, color: C.text }} />
                   <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ชื่อเมนู" style={{ flex: 1, padding: "8px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F, color: C.text }} />
@@ -666,7 +714,7 @@ export default function KitchenPage() {
                 </div>
                 <input value={newIng} onChange={e => setNewIng(e.target.value)} placeholder="วัตถุดิบ (ถ้ามี)" style={{ padding: "8px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F, color: C.text }} />
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={handleAddMenu} disabled={adding} style={{ flex: 1, padding: "9px", background: C.amberSolid, color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>{adding ? "กำลังเพิ่ม..." : "เพิ่มเมนู"}</button>
+                  <button onClick={handleAddMenu} disabled={adding} style={{ flex: 1, padding: "9px", background: C.amberSolid, color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>{adding ? (imgUploading ? "กำลังอัปโหลดรูป..." : "กำลังเพิ่ม...") : "เพิ่มเมนู"}</button>
                   <button onClick={() => setShowAdd(false)} style={{ flex: 1, padding: "9px", background: C.card2, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: F }}>ยกเลิก</button>
                 </div>
               </div>
@@ -680,7 +728,11 @@ export default function KitchenPage() {
             ) : filtered.map(item => (
               <div key={item.id} style={{ background: C.card, border: `1px solid ${item.available ? C.border : C.redBorder}`, borderRadius: 14, padding: "12px 14px", opacity: item.available ? 1 : 0.7 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ width: 44, height: 44, borderRadius: 10, background: C.card2, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>{item.emoji}</div>
+                  <div style={{ width: 44, height: 44, borderRadius: 10, background: C.card2, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0, overflow: "hidden" }}>
+                    {(item as any).image_url ? (
+                      <img src={(item as any).image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : item.emoji}
+                  </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 2 }}>{item.name}</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -698,6 +750,30 @@ export default function KitchenPage() {
 
                 {editing === item.id && (
                   <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
+                    {/* รูปเมนู */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <label style={{ width: 64, height: 64, borderRadius: 12, background: C.card2, border: `1px dashed ${C.borderStrong}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer", overflow: "hidden" }}>
+                        {editImagePreview ? (
+                          <img src={editImagePreview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        ) : (
+                          <span style={{ fontSize: 22, color: C.muted }}>📷</span>
+                        )}
+                        <input type="file" accept="image/*" style={{ display: "none" }}
+                          onChange={e => {
+                            const f = e.target.files?.[0]; if (!f) return;
+                            setEditImageFile(f); setEditImagePreview(URL.createObjectURL(f));
+                          }} />
+                      </label>
+                      <div style={{ flex: 1, fontSize: 12, color: C.muted }}>
+                        แตะเพื่อเปลี่ยนรูปเมนู
+                        {editImagePreview && (
+                          <div>
+                            <button type="button" onClick={() => { setEditImageFile(null); setEditImagePreview(null); }}
+                              style={{ marginTop: 4, background: "transparent", border: "none", color: C.red, fontSize: 12, cursor: "pointer", padding: 0, fontFamily: F }}>✕ เอารูปออก</button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                     {[["ชื่อเมนู", editName, setEditName, "text"], ["ราคา (บาท)", editPrice, setEditPrice, "number"], ["วัตถุดิบ", editIng, setEditIng, "text"]].map(([label, val, setter, type]) => (
                       <div key={label as string}>
                         <label style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{label as string}</label>
@@ -706,8 +782,8 @@ export default function KitchenPage() {
                       </div>
                     ))}
                     <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                      <button onClick={() => handleSave(item)} disabled={saving === item.id} style={{ flex: 1, padding: "9px", background: C.greenSolid, color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>บันทึก</button>
-                      <button onClick={() => setEditing(null)} style={{ flex: 1, padding: "9px", background: C.card2, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: F }}>ยกเลิก</button>
+                      <button onClick={() => handleSave(item)} disabled={saving === item.id} style={{ flex: 1, padding: "9px", background: C.greenSolid, color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>{saving === item.id ? (imgUploading ? "กำลังอัปโหลดรูป..." : "กำลังบันทึก...") : "บันทึก"}</button>
+                      <button onClick={() => { setEditing(null); setEditImageFile(null); setEditImagePreview(null); }} style={{ flex: 1, padding: "9px", background: C.card2, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: F }}>ยกเลิก</button>
                       <button onClick={() => setDeleteConfirm(item.id)} style={{ padding: "9px 14px", background: C.redBg, color: C.red, border: `1px solid ${C.redBorder}`, borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>🗑 ลบ</button>
                     </div>
                     {deleteConfirm === item.id && (

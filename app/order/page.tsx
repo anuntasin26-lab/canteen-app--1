@@ -480,7 +480,11 @@ function OrderFlow() {
       <div style={{ flex: 1, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8, overflowY: "auto" }}>
         {filtered.map((m) => (
           <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", border: "1px solid #E2DDD6", borderRadius: 14, opacity: m.available ? 1 : 0.45, pointerEvents: m.available ? "auto" : "none" }}>
-            <div style={{ width: 48, height: 48, borderRadius: 10, background: "#F5F3EE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>{m.emoji}</div>
+            <div style={{ width: 48, height: 48, borderRadius: 10, background: "#F5F3EE", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0, overflow: "hidden" }}>
+              {(m as any).image_url ? (
+                <img src={(m as any).image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : m.emoji}
+            </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#1C1A17" }}>
                 {m.name}

@@ -42,6 +42,7 @@ export async function updateMenuItem(id: number, fields: {
   name?: string;
   price?: number;
   ingredients?: string;
+  image_url?: string | null;
 }) {
   const { error } = await supabase
     .from("menu_items").update(fields).eq("id", id);
@@ -66,6 +67,7 @@ export async function createMenuItem(fields: {
   category: string;
   emoji?: string;
   ingredients?: string;
+  image_url?: string | null;
 }) {
   const { data, error } = await supabase
     .from("menu_items")
@@ -81,6 +83,45 @@ export async function deleteMenuItem(id: number) {
   const { error } = await supabase
     .from("menu_items").delete().eq("id", id);
   if (error) throw error;
+}
+
+// ── Menu Images (Supabase Storage) ─────────────────────────
+// ต้องสร้าง bucket ชื่อ "menu-images" แบบ Public ใน Supabase Dashboard
+// (Storage → New bucket → ตั้งชื่อ "menu-images" → เปิด Public bucket)
+// ดูขั้นตอนเต็มในไฟล์ menu_images_setup.sql
+
+const MENU_IMAGE_BUCKET = "menu-images";
+const MAX_MENU_IMAGE_MB = 5;
+
+/** อัปโหลดรูปเมนู แล้วคืน public URL — ใช้ตอนเพิ่ม/แก้ไขเมนู */
+export async function uploadMenuImage(file: File, menuId?: number) {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("ไฟล์ต้องเป็นรูปภาพเท่านั้น");
+  }
+  if (file.size > MAX_MENU_IMAGE_MB * 1024 * 1024) {
+    throw new Error(`รูปต้องมีขนาดไม่เกิน ${MAX_MENU_IMAGE_MB}MB`);
+  }
+  const ext = file.name.split(".").pop() || "jpg";
+  const path = `${menuId ?? "new"}-${Date.now()}.${ext}`;
+
+  const { error: uploadError } = await supabase
+    .storage.from(MENU_IMAGE_BUCKET)
+    .upload(path, file, { upsert: true, cacheControl: "3600" });
+  if (uploadError) throw uploadError;
+
+  const { data } = supabase.storage.from(MENU_IMAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl as string;
+}
+
+/** ลบรูปเมนูเก่าออกจาก storage (เรียกตอนเปลี่ยนรูปใหม่ หรือลบเมนู) */
+export async function deleteMenuImage(imageUrl: string) {
+  try {
+    const path = imageUrl.split(`${MENU_IMAGE_BUCKET}/`).pop();
+    if (!path) return;
+    await supabase.storage.from(MENU_IMAGE_BUCKET).remove([path]);
+  } catch {
+    // ไม่ต้อง throw — ลบรูปเก่าไม่สำเร็จไม่ควรบล็อกการทำงานหลัก
+  }
 }
 
 // ── Announcements ────────────────────────────────────────

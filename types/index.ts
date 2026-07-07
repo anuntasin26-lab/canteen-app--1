@@ -17,6 +17,7 @@ export interface MenuItem {
   available: boolean;
   sort_order: number;
   ingredients?: string;
+  image_url?: string | null;
 }
 
 export interface OrderItem {
