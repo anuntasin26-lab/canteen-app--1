@@ -1,6 +1,7 @@
 "use client";
 // ─── app/kitchen/page.tsx ─────────────────────────────────
 // รวม: ออเดอร์ (Kanban) + จัดการเมนู + ประวัติ — PIN เดียว
+// Redesign: dark theme, delivery-app-style colored cards, big touch targets
 
 import { useEffect, useRef, useState } from "react";
 import {
@@ -35,22 +36,39 @@ const isWarn = (o: Order) => {
   return (o.status === "new" && sec > 120) || (o.status === "cooking" && sec > 600);
 };
 
-// ── สี ────────────────────────────────────────────────────
+// ── สี (Dark theme, delivery-app-style accents) ────────────
 const C = {
-  green: "#2D5409", greenL: "#E5F0D5", greenB: "#A9CF6A",
-  amber: "#A8650E", amberL: "#FCEACB",
-  red: "#A8281F", redL: "#FBDCDA",
-  text: "#15130F", muted: "#5C5852", border: "#DEDACF", bg: "#F7F5F0",
-  card: "#FFFFFF",
+  bg:      "#101215",   // page background
+  card:    "#1B1E22",   // card surface
+  card2:   "#24272B",   // nested surface (item rows, inputs, chips)
+  border:  "#2E3236",
+  borderStrong: "#3D4247",
+  text:    "#F2F1ED",
+  muted:   "#9AA0A6",
+
+  green:       "#4ADE80", // bright text/icon on dark tint
+  greenBg:     "#132A1D", // dark tinted header/badge bg
+  greenBorder: "#255239",
+  greenSolid:  "#2D8049", // solid button fill (white text on top)
+
+  amber:       "#FBBF5B",
+  amberBg:     "#2E2412",
+  amberBorder: "#4E3B18",
+  amberSolid:  "#B4790F",
+
+  red:       "#FF7A6E",
+  redBg:     "#341715",
+  redBorder: "#57241F",
+  redSolid:  "#B4362A",
 };
 const F = "Sarabun, sans-serif";
 const DEFAULT_CATS = ["ข้าว", "ก๋วยเตี๋ยว", "เครื่องดื่ม"];
 
 // ── Kanban columns ────────────────────────────────────────
 const COLS = [
-  { status: "new" as OrderStatus,     label: "ใหม่",       icon: "🔔", hBg: C.redL,   hC: C.red,   cBg: "#F0B3AC", bLabel: "รับออร์เดอร์", bBg: C.red,   next: "cooking" as const },
-  { status: "cooking" as OrderStatus, label: "กำลังปรุง",  icon: "👨‍🍳", hBg: C.amberL, hC: C.amber, cBg: "#F2CD8F", bLabel: "เสร็จแล้ว",   bBg: C.amber, next: "done" as const },
-  { status: "done" as OrderStatus,    label: "เสิร์ฟแล้ว", icon: "✅", hBg: C.greenL, hC: C.green, cBg: C.greenB, bLabel: "ล้างรายการ",  bBg: C.green, next: null },
+  { status: "new" as OrderStatus,     label: "ออเดอร์ใหม่", icon: "🔔",    hBg: C.redBg,   hC: C.red,   cBg: C.redBorder,   bLabel: "เริ่มทำ",    bBg: C.redSolid,   next: "cooking" as const, accent: C.red },
+  { status: "cooking" as OrderStatus, label: "กำลังทำ",     icon: "👨‍🍳", hBg: C.amberBg, hC: C.amber, cBg: C.amberBorder, bLabel: "เสร็จแล้ว",  bBg: C.amberSolid, next: "done" as const,    accent: C.amber },
+  { status: "done" as OrderStatus,    label: "เสร็จแล้ว",   icon: "✅",    hBg: C.greenBg, hC: C.green, cBg: C.greenBorder, bLabel: "ล้างรายการ", bBg: C.greenSolid, next: null,               accent: C.green },
 ];
 
 // ─────────────────────────────────────────────────────────
@@ -362,22 +380,22 @@ export default function KitchenPage() {
   // ── PIN SCREEN ────────────────────────────────────────
   if (!unlocked) return (
     <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: C.bg, fontFamily: F, padding: 24 }}>
-      <div style={{ fontSize: 56, marginBottom: 16 }}>🍳</div>
+      <div style={{ width: 88, height: 88, borderRadius: 24, background: C.card, border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 44, marginBottom: 20 }}>🍳</div>
       <div style={{ fontSize: 24, fontWeight: 700, color: C.text, marginBottom: 6 }}>หน้าครัว</div>
       <div style={{ fontSize: 15, color: C.muted, marginBottom: 36 }}>ใส่ PIN เพื่อเข้าใช้งาน</div>
       <div style={{ display: "flex", gap: 18, marginBottom: 36 }}>
         {[0,1,2,3].map(i => (
-          <div key={i} style={{ width: 20, height: 20, borderRadius: "50%", background: pin.length > i ? (pinError ? C.red : C.green) : C.border, transition: "background .15s" }} />
+          <div key={i} style={{ width: 20, height: 20, borderRadius: "50%", background: pin.length > i ? (pinError ? C.redSolid : C.greenSolid) : C.card2, border: `1px solid ${pin.length > i ? "transparent" : C.borderStrong}`, transition: "background .15s" }} />
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, maxWidth: 280, width: "100%" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, maxWidth: 300, width: "100%" }}>
         {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((n, i) => (
           <button key={i}
             onClick={() => {
               if (n === "⌫") setPin(p => p.slice(0,-1));
               else if (n !== "") handlePin(pin + String(n));
             }}
-            style={{ padding: "20px 0", border: `1.5px solid ${C.border}`, borderRadius: 14, background: n === "" ? "transparent" : C.card, fontSize: 24, fontWeight: 600, cursor: n === "" ? "default" : "pointer", color: C.text, fontFamily: F }}>
+            style={{ padding: "22px 0", border: `1px solid ${C.border}`, borderRadius: 16, background: n === "" ? "transparent" : C.card, fontSize: 24, fontWeight: 500, cursor: n === "" ? "default" : "pointer", color: C.text, fontFamily: F }}>
             {n}
           </button>
         ))}
@@ -392,14 +410,14 @@ export default function KitchenPage() {
 
       {/* Toast ออเดอร์ใหม่ */}
       {toast && (
-        <div style={{ position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)", background: C.green, color: "#fff", padding: "12px 28px", borderRadius: "0 0 16px 16px", fontSize: 15, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap" }}>
+        <div style={{ position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)", background: C.greenSolid, color: "#fff", padding: "12px 28px", borderRadius: "0 0 16px 16px", fontSize: 15, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap" }}>
           🔔 มีออร์เดอร์ใหม่!
         </div>
       )}
 
       {/* Toast เมนู */}
       {menuToast && (
-        <div style={{ position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)", background: C.amber, color: "#fff", padding: "12px 28px", borderRadius: "0 0 16px 16px", fontSize: 15, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap" }}>
+        <div style={{ position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)", background: C.amberSolid, color: "#fff", padding: "12px 28px", borderRadius: "0 0 16px 16px", fontSize: 15, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap" }}>
           ✓ {menuToast}
         </div>
       )}
@@ -411,8 +429,8 @@ export default function KitchenPage() {
           <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{new Date().toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long" })}</div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={playBeep} style={{ padding: "8px 12px", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 24, fontSize: 12, fontWeight: 600, color: C.muted, cursor: "pointer", fontFamily: F }}>🔔</button>
-          <button onClick={handleLock} style={{ padding: "8px 12px", background: C.redL, border: `1px solid #ECA59D`, borderRadius: 24, fontSize: 12, fontWeight: 600, color: C.red, cursor: "pointer", fontFamily: F }}>🔒 ล็อก</button>
+          <button onClick={playBeep} style={{ padding: "8px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 24, fontSize: 12, fontWeight: 600, color: C.muted, cursor: "pointer", fontFamily: F }}>🔔</button>
+          <button onClick={handleLock} style={{ padding: "8px 12px", background: C.redBg, border: `1px solid ${C.redBorder}`, borderRadius: 24, fontSize: 12, fontWeight: 600, color: C.red, cursor: "pointer", fontFamily: F }}>🔒 ล็อก</button>
         </div>
       </div>
 
@@ -447,7 +465,7 @@ export default function KitchenPage() {
           ["history", "🕐 ประวัติ"],
         ].map(([t, l]) => (
           <button key={t} onClick={() => setTab(t as any)}
-            style={{ flex: 1, padding: "10px 0", border: `1.5px solid ${tab === t ? C.green : C.border}`, borderRadius: 14, background: tab === t ? C.greenL : C.card, color: tab === t ? C.green : C.muted, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>
+            style={{ flex: 1, padding: "10px 0", border: `1px solid ${tab === t ? C.greenBorder : C.border}`, borderRadius: 14, background: tab === t ? C.greenBg : C.card, color: tab === t ? C.green : C.muted, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>
             {l}
           </button>
         ))}
@@ -460,40 +478,40 @@ export default function KitchenPage() {
           {/* ── Section: ตามสั่ง ── */}
           {customOrders.length > 0 && (
             <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 14, marginBottom: 10, background: "#FEF3DC", border: "1.5px solid #F2CD8F" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 14, marginBottom: 10, background: C.amberBg, border: `1px solid ${C.amberBorder}` }}>
                 <span style={{ fontSize: 20 }}>✏️</span>
-                <span style={{ fontSize: 17, fontWeight: 800, color: "#A8650E", flex: 1 }}>ตามสั่ง</span>
-                <span style={{ fontSize: 15, fontWeight: 800, background: "#F2CD8F", color: "#A8650E", padding: "4px 14px", borderRadius: 20 }}>{customOrders.length} รายการ</span>
+                <span style={{ fontSize: 17, fontWeight: 700, color: C.amber, flex: 1 }}>ตามสั่ง</span>
+                <span style={{ fontSize: 15, fontWeight: 700, background: C.amberBorder, color: C.amber, padding: "4px 14px", borderRadius: 20 }}>{customOrders.length} รายการ</span>
               </div>
               {customOrders.map(o => {
                 const CUSTOM_COLS: Record<string, { next: "cooking"|"done"|null, bLabel: string, bBg: string, hC: string, hBg: string }> = {
-                  new:     { next: "cooking", bLabel: "รับออร์เดอร์", bBg: "#A8281F", hC: "#A8281F", hBg: "#FBDCDA" },
-                  cooking: { next: "done",    bLabel: "เสร็จแล้ว",   bBg: "#A8650E", hC: "#A8650E", hBg: "#FCEACB" },
-                  done:    { next: null,       bLabel: "ล้างรายการ",  bBg: "#2D5409", hC: "#2D5409", hBg: "#E5F0D5" },
+                  new:     { next: "cooking", bLabel: "เริ่มทำ",     bBg: C.redSolid,   hC: C.red,   hBg: C.redBg },
+                  cooking: { next: "done",    bLabel: "เสร็จแล้ว",   bBg: C.amberSolid, hC: C.amber, hBg: C.amberBg },
+                  done:    { next: null,      bLabel: "ล้างรายการ",  bBg: C.greenSolid, hC: C.green, hBg: C.greenBg },
                 };
                 const col = CUSTOM_COLS[o.status] ?? CUSTOM_COLS.new;
                 return (
-                  <div key={o.id} style={{ borderRadius: 16, marginBottom: 10, background: C.card, overflow: "hidden", border: `1.5px solid #F2CD8F` }}>
-                    <div style={{ padding: "10px 14px", borderBottom: "1px solid #F2CD8F", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#FFFDF5" }}>
+                  <div key={o.id} style={{ borderRadius: 16, marginBottom: 10, background: C.card, overflow: "hidden", border: `1px solid ${C.amberBorder}`, borderLeft: `4px solid ${C.amber}` }}>
+                    <div style={{ padding: "10px 14px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.card2 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, background: "#F2CD8F", color: "#A8650E", padding: "2px 10px", borderRadius: 10 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, background: col.hBg, color: col.hC, padding: "2px 10px", borderRadius: 10 }}>
                           {o.status === "new" ? "🔔 ใหม่" : o.status === "cooking" ? "👨‍🍳 ปรุง" : "✅ เสร็จ"}
                         </span>
                       </div>
                       <span style={{ fontSize: 12, color: C.muted }}>#{String(o.id).padStart(4,"0")}</span>
                     </div>
                     <div style={{ padding: "12px 14px" }}>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: C.text, marginBottom: 6 }}>👤 {o.customer_name}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: C.text, marginBottom: 6 }}>👤 {o.customer_name}</div>
                       <div style={{ fontSize: 13, color: C.muted, marginBottom: 6 }}>แผนก {o.dept_id}</div>
                       {/* รายการอาหารที่พิมพ์มา */}
-                      <div style={{ padding: "10px 12px", background: "#FFFDF5", border: "1px solid #F2CD8F", borderRadius: 10, fontSize: 14, color: C.text, lineHeight: 1.8, marginBottom: o.note ? 8 : 12, whiteSpace: "pre-wrap" }}>
+                      <div style={{ padding: "10px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 10, fontSize: 14, color: C.text, lineHeight: 1.8, marginBottom: o.note ? 8 : 12, whiteSpace: "pre-wrap" }}>
                         {o.items}
                       </div>
-                      {o.note && <div style={{ fontSize: 13, color: "#A8650E", background: "#FEF3DC", padding: "6px 12px", borderRadius: 8, marginBottom: 12, fontWeight: 600 }}>📝 {o.note}</div>}
+                      {o.note && <div style={{ fontSize: 13, color: C.amber, background: C.amberBg, padding: "6px 12px", borderRadius: 8, marginBottom: 12, fontWeight: 600 }}>📝 {o.note}</div>}
                       <div style={{ display: "flex", gap: 8 }}>
                         {col.next ? (
                           <button onClick={() => handleCustomMove(o.id, col.next!)}
-                            style={{ flex: 1, padding: "12px 0", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>
+                            style={{ flex: 1, padding: "14px 0", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>
                             {col.bLabel} →
                           </button>
                         ) : (
@@ -506,13 +524,13 @@ export default function KitchenPage() {
                             });
                             setCustomOrders(p => p.filter(x => x.id !== o.id));
                           }}
-                            style={{ flex: 1, padding: "12px 0", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>
+                            style={{ flex: 1, padding: "14px 0", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>
                             {col.bLabel}
                           </button>
                         )}
                         {col.next && (
                           <button onClick={() => handleCustomCancel(o.id)}
-                            style={{ padding: "12px 16px", border: "1.5px solid #ECA59D", background: "#FEF0EF", borderRadius: 12, cursor: "pointer", fontSize: 14, color: C.red, fontWeight: 700, fontFamily: F }}>
+                            style={{ padding: "14px 16px", border: `1px solid ${C.redBorder}`, background: C.redBg, borderRadius: 12, cursor: "pointer", fontSize: 14, color: C.red, fontWeight: 700, fontFamily: F }}>
                             ✕ ยกเลิก
                           </button>
                         )}
@@ -529,45 +547,50 @@ export default function KitchenPage() {
             const colOrders = orders.filter(o => o.status === col.status && o.status !== ("cancelled" as any));
             return (
               <div key={col.status}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 14, marginBottom: 10, background: col.hBg, border: `1.5px solid ${col.cBg}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 14, marginBottom: 10, background: col.hBg, border: `1px solid ${col.cBg}` }}>
                   <span style={{ fontSize: 20 }}>{col.icon}</span>
-                  <span style={{ fontSize: 17, fontWeight: 800, color: col.hC, flex: 1 }}>{col.label}</span>
-                  <span style={{ fontSize: 15, fontWeight: 800, background: col.cBg, color: col.hC, padding: "4px 14px", borderRadius: 20 }}>{colOrders.length} รายการ</span>
+                  <span style={{ fontSize: 17, fontWeight: 700, color: col.hC, flex: 1 }}>{col.label}</span>
+                  <span style={{ fontSize: 15, fontWeight: 700, background: col.cBg, color: col.hC, padding: "4px 14px", borderRadius: 20 }}>{colOrders.length} รายการ</span>
                 </div>
 
                 {colOrders.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "18px 0", fontSize: 14, color: C.muted, border: `1.5px dashed ${C.border}`, borderRadius: 14 }}>— ไม่มีรายการ —</div>
+                  <div style={{ textAlign: "center", padding: "18px 0", fontSize: 14, color: C.muted, border: `1px dashed ${C.border}`, borderRadius: 14 }}>— ไม่มีรายการ —</div>
                 ) : colOrders.map(o => (
-                  <div key={o.id} style={{ borderRadius: 16, marginBottom: 10, background: C.card, overflow: "hidden", border: isWarn(o) && o.status === "new" ? `2px solid ${C.red}` : `1px solid ${C.border}`, boxShadow: isWarn(o) && o.status === "new" ? `0 0 0 3px ${C.redL}` : "none" }}>
-                    <div style={{ padding: "12px 14px 10px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div key={o.id} style={{
+                    borderRadius: 16, marginBottom: 10, background: C.card, overflow: "hidden",
+                    border: isWarn(o) && o.status === "new" ? `1px solid ${C.red}` : `1px solid ${C.border}`,
+                    borderLeft: `4px solid ${col.accent}`,
+                    boxShadow: isWarn(o) && o.status === "new" ? `0 0 0 3px ${C.redBg}` : "none",
+                  }}>
+                    <div style={{ padding: "12px 14px 10px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.card2 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 20, fontWeight: 800, color: isWarn(o) ? C.red : C.text }}>{fmt(o.created_at, o.started_at)}</span>
-                        {isWarn(o) && o.status === "new" && <span style={{ fontSize: 11, fontWeight: 700, background: C.red, color: "#fff", padding: "2px 8px", borderRadius: 8 }}>⚡ รีบด่วน</span>}
+                        <span style={{ fontSize: 20, fontWeight: 700, color: isWarn(o) ? C.red : C.text }}>{fmt(o.created_at, o.started_at)}</span>
+                        {isWarn(o) && o.status === "new" && <span style={{ fontSize: 11, fontWeight: 700, background: C.redSolid, color: "#fff", padding: "2px 8px", borderRadius: 8 }}>⚡ รีบด่วน</span>}
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, background: C.greenL, color: C.green, padding: "3px 10px", borderRadius: 10 }}>{(o as any).departments?.name ?? o.dept_id}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, background: C.greenBg, color: C.green, padding: "3px 10px", borderRadius: 10 }}>{(o as any).departments?.name ?? o.dept_id}</span>
                         <span style={{ fontSize: 12, color: C.muted }}>#{String(o.id).padStart(4,"0")}</span>
                       </div>
                     </div>
                     <div style={{ padding: "12px 14px" }}>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: C.text, marginBottom: 8 }}>👤 {o.customer_name}</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: C.text, marginBottom: 8 }}>👤 {o.customer_name}</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: o.note ? 8 : 12 }}>
                         {o.items.map((it, i) => (
-                          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", background: C.bg, borderRadius: 8 }}>
+                          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", background: C.card2, borderRadius: 8 }}>
                             <span style={{ fontSize: 15, fontWeight: 600, color: C.text }}>🍽 {it.name}</span>
-                            <span style={{ fontSize: 15, fontWeight: 800, color: col.hC, background: col.hBg, padding: "2px 10px", borderRadius: 8 }}>×{it.qty}</span>
+                            <span style={{ fontSize: 15, fontWeight: 700, color: col.hC, background: col.hBg, padding: "2px 10px", borderRadius: 8 }}>×{it.qty}</span>
                           </div>
                         ))}
                       </div>
-                      {o.note && <div style={{ fontSize: 14, color: C.amber, background: C.amberL, padding: "7px 12px", borderRadius: 10, marginBottom: 12, fontWeight: 600 }}>📝 {o.note}</div>}
+                      {o.note && <div style={{ fontSize: 14, color: C.amber, background: C.amberBg, padding: "7px 12px", borderRadius: 10, marginBottom: 12, fontWeight: 600 }}>📝 {o.note}</div>}
                       <div style={{ display: "flex", gap: 8 }}>
                         {col.next ? (
-                          <button onClick={() => handleMove(o.id, col.next!)} style={{ flex: 1, padding: "12px 0", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 800, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>{col.bLabel} →</button>
+                          <button onClick={() => handleMove(o.id, col.next!)} style={{ flex: 1, padding: "14px 0", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>{col.bLabel} →</button>
                         ) : (
-                          <button onClick={() => handleClearDone(o.id)} style={{ flex: 1, padding: "12px 0", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 800, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>{col.bLabel}</button>
+                          <button onClick={() => handleClearDone(o.id)} style={{ flex: 1, padding: "14px 0", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>{col.bLabel}</button>
                         )}
                         {col.next && (
-                          <button onClick={() => handleCancel(o.id)} style={{ padding: "12px 16px", border: `1.5px solid #ECA59D`, background: "#FEF0EF", borderRadius: 12, cursor: "pointer", fontSize: 14, color: C.red, fontWeight: 700, fontFamily: F }}>✕ ยกเลิก</button>
+                          <button onClick={() => handleCancel(o.id)} style={{ padding: "14px 16px", border: `1px solid ${C.redBorder}`, background: C.redBg, borderRadius: 12, cursor: "pointer", fontSize: 14, color: C.red, fontWeight: 700, fontFamily: F }}>✕ ยกเลิก</button>
                         )}
                       </div>
                     </div>
@@ -584,9 +607,9 @@ export default function KitchenPage() {
         <div>
           {/* ประกาศ */}
           <div style={{ margin: "0 16px 12px", padding: "12px 14px", background: C.card, border: `1px solid ${C.border}`, borderRadius: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>📢 ประกาศถึงลูกค้า</div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: C.text }}>📢 ประกาศถึงลูกค้า</div>
             <button onClick={quickAnnounce} disabled={annSending}
-              style={{ width: "100%", padding: "10px", background: C.green, color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: annSending ? "not-allowed" : "pointer", fontFamily: F, marginBottom: 6 }}>
+              style={{ width: "100%", padding: "10px", background: C.greenSolid, color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: annSending ? "not-allowed" : "pointer", fontFamily: F, marginBottom: 6 }}>
               {annSending ? "กำลังส่ง..." : "🔔 แจ้ง \"เมนูวันนี้อัปเดตแล้ว\""}
             </button>
             {!showAnn ? (
@@ -594,10 +617,10 @@ export default function KitchenPage() {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <input value={annText} onChange={e => setAnnText(e.target.value)} placeholder="พิมพ์ข้อความประกาศ..."
-                  style={{ padding: "8px 12px", border: `1.5px solid ${C.green}`, borderRadius: 8, fontSize: 13, fontFamily: F, outline: "none" }} />
+                  style={{ padding: "8px 12px", background: C.card2, border: `1px solid ${C.greenBorder}`, borderRadius: 8, fontSize: 13, fontFamily: F, outline: "none", color: C.text }} />
                 <div style={{ display: "flex", gap: 6 }}>
-                  <button onClick={handleAnnounce} disabled={annSending} style={{ flex: 1, padding: "8px", background: C.green, color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: F }}>ส่ง</button>
-                  <button onClick={() => setShowAnn(false)} style={{ flex: 1, padding: "8px", background: C.bg, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: F }}>ยกเลิก</button>
+                  <button onClick={handleAnnounce} disabled={annSending} style={{ flex: 1, padding: "8px", background: C.greenSolid, color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: F }}>ส่ง</button>
+                  <button onClick={() => setShowAnn(false)} style={{ flex: 1, padding: "8px", background: C.card2, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: F }}>ยกเลิก</button>
                 </div>
               </div>
             )}
@@ -607,44 +630,44 @@ export default function KitchenPage() {
           <div style={{ display: "flex", gap: 6, padding: "0 16px 10px", overflowX: "auto", scrollbarWidth: "none", alignItems: "center" }}>
             {CATS.map(c => (
               <button key={c} onClick={() => setMenuCat(c)}
-                style={{ padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", border: menuCat === c ? "none" : `1px solid ${C.border}`, background: menuCat === c ? C.green : "transparent", color: menuCat === c ? "#fff" : C.muted, fontFamily: F }}>
+                style={{ padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", border: menuCat === c ? "none" : `1px solid ${C.border}`, background: menuCat === c ? C.greenSolid : "transparent", color: menuCat === c ? "#fff" : C.muted, fontFamily: F }}>
                 {c}
               </button>
             ))}
             <button onClick={() => setShowAdd(true)}
-              style={{ padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", cursor: "pointer", border: "none", background: C.amber, color: "#fff", fontFamily: F, marginLeft: "auto", flexShrink: 0 }}>
+              style={{ padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", cursor: "pointer", border: "none", background: C.amberSolid, color: "#fff", fontFamily: F, marginLeft: "auto", flexShrink: 0 }}>
               + เพิ่มเมนู
             </button>
           </div>
 
           {/* Form เพิ่มเมนู */}
           {showAdd && (
-            <div style={{ margin: "0 16px 12px", padding: "14px", background: C.card, border: `1.5px solid ${C.amber}`, borderRadius: 14 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🍽️ เมนูใหม่</div>
+            <div style={{ margin: "0 16px 12px", padding: "14px", background: C.card, border: `1px solid ${C.amberBorder}`, borderRadius: 14 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10, color: C.text }}>🍽️ เมนูใหม่</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <input value={newEmoji} onChange={e => setNewEmoji(e.target.value)} placeholder="🍽️" style={{ width: 50, padding: "8px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 16, textAlign: "center", fontFamily: F }} />
-                  <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ชื่อเมนู" style={{ flex: 1, padding: "8px 12px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F }} />
+                  <input value={newEmoji} onChange={e => setNewEmoji(e.target.value)} placeholder="🍽️" style={{ width: 50, padding: "8px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 16, textAlign: "center", fontFamily: F, color: C.text }} />
+                  <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ชื่อเมนู" style={{ flex: 1, padding: "8px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F, color: C.text }} />
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <input type="number" value={newPrice} onChange={e => setNewPrice(e.target.value)} placeholder="ราคา" style={{ flex: 1, padding: "8px 12px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F }} />
+                  <input type="number" value={newPrice} onChange={e => setNewPrice(e.target.value)} placeholder="ราคา" style={{ flex: 1, padding: "8px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F, color: C.text }} />
                   {!newCatCustom ? (
                     <select value={newCat} onChange={e => { if (e.target.value === "__custom__") { setNewCatCustom(true); setNewCatText(""); } else setNewCat(e.target.value); }}
-                      style={{ flex: 1, padding: "8px 12px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F }}>
+                      style={{ flex: 1, padding: "8px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F, color: C.text }}>
                       {allCats.map(c => <option key={c} value={c}>{c}</option>)}
                       <option value="__custom__">+ หมวดใหม่...</option>
                     </select>
                   ) : (
                     <div style={{ flex: 1, display: "flex", gap: 6 }}>
-                      <input value={newCatText} onChange={e => setNewCatText(e.target.value)} placeholder="พิมพ์ชื่อหมวดใหม่" autoFocus style={{ flex: 1, padding: "8px 12px", border: `1.5px solid ${C.amber}`, borderRadius: 8, fontSize: 13, fontFamily: F }} />
-                      <button onClick={() => { setNewCatCustom(false); setNewCatText(""); }} style={{ padding: "0 10px", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, cursor: "pointer", fontSize: 12 }}>✕</button>
+                      <input value={newCatText} onChange={e => setNewCatText(e.target.value)} placeholder="พิมพ์ชื่อหมวดใหม่" autoFocus style={{ flex: 1, padding: "8px 12px", background: C.card2, border: `1px solid ${C.amberBorder}`, borderRadius: 8, fontSize: 13, fontFamily: F, color: C.text }} />
+                      <button onClick={() => { setNewCatCustom(false); setNewCatText(""); }} style={{ padding: "0 10px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, cursor: "pointer", fontSize: 12 }}>✕</button>
                     </div>
                   )}
                 </div>
-                <input value={newIng} onChange={e => setNewIng(e.target.value)} placeholder="วัตถุดิบ (ถ้ามี)" style={{ padding: "8px 12px", border: `1.5px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F }} />
+                <input value={newIng} onChange={e => setNewIng(e.target.value)} placeholder="วัตถุดิบ (ถ้ามี)" style={{ padding: "8px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F, color: C.text }} />
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={handleAddMenu} disabled={adding} style={{ flex: 1, padding: "9px", background: C.amber, color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>{adding ? "กำลังเพิ่ม..." : "เพิ่มเมนู"}</button>
-                  <button onClick={() => setShowAdd(false)} style={{ flex: 1, padding: "9px", background: C.bg, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: F }}>ยกเลิก</button>
+                  <button onClick={handleAddMenu} disabled={adding} style={{ flex: 1, padding: "9px", background: C.amberSolid, color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>{adding ? "กำลังเพิ่ม..." : "เพิ่มเมนู"}</button>
+                  <button onClick={() => setShowAdd(false)} style={{ flex: 1, padding: "9px", background: C.card2, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: F }}>ยกเลิก</button>
                 </div>
               </div>
             </div>
@@ -655,20 +678,20 @@ export default function KitchenPage() {
             {loadingMenu ? (
               <div style={{ textAlign: "center", padding: 32, color: C.muted }}>กำลังโหลด...</div>
             ) : filtered.map(item => (
-              <div key={item.id} style={{ background: C.card, border: `1px solid ${item.available ? C.border : "#F5B4AE"}`, borderRadius: 14, padding: "12px 14px", opacity: item.available ? 1 : 0.7 }}>
+              <div key={item.id} style={{ background: C.card, border: `1px solid ${item.available ? C.border : C.redBorder}`, borderRadius: 14, padding: "12px 14px", opacity: item.available ? 1 : 0.7 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ width: 44, height: 44, borderRadius: 10, background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>{item.emoji}</div>
+                  <div style={{ width: 44, height: 44, borderRadius: 10, background: C.card2, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>{item.emoji}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 2 }}>{item.name}</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{ fontSize: 14, fontWeight: 700, color: C.green }}>{item.price} บาท</span>
                       <button onClick={() => editing === item.id ? setEditing(null) : openEdit(item)}
-                        style={{ fontSize: 11, color: C.muted, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontFamily: F }}>✏️ แก้ไข</button>
+                        style={{ fontSize: 11, color: C.muted, background: C.card2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontFamily: F }}>✏️ แก้ไข</button>
                     </div>
                     {(item as any).ingredients && <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>🧂 {(item as any).ingredients}</div>}
                   </div>
                   <button onClick={() => handleToggle(item)} disabled={saving === item.id}
-                    style={{ padding: "8px 14px", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: saving === item.id ? "not-allowed" : "pointer", background: item.available ? C.green : C.redL, color: item.available ? "#fff" : C.red, flexShrink: 0, fontFamily: F, minWidth: 64 }}>
+                    style={{ padding: "8px 14px", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: saving === item.id ? "not-allowed" : "pointer", background: item.available ? C.greenSolid : C.redBg, color: item.available ? "#fff" : C.red, flexShrink: 0, fontFamily: F, minWidth: 64 }}>
                     {saving === item.id ? "..." : item.available ? "เปิด" : "ปิด"}
                   </button>
                 </div>
@@ -679,19 +702,19 @@ export default function KitchenPage() {
                       <div key={label as string}>
                         <label style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{label as string}</label>
                         <input type={type as string} value={val as string} onChange={e => (setter as any)(e.target.value)} placeholder={label === "วัตถุดิบ" ? "เช่น หมูสับ, กระเพรา" : ""}
-                          style={{ width: "100%", padding: "8px 12px", border: `1.5px solid ${C.green}`, borderRadius: 8, fontSize: 13, fontFamily: F, outline: "none", marginTop: 4 }} />
+                          style={{ width: "100%", padding: "8px 12px", background: C.card2, border: `1px solid ${C.greenBorder}`, borderRadius: 8, fontSize: 13, fontFamily: F, outline: "none", marginTop: 4, color: C.text }} />
                       </div>
                     ))}
                     <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                      <button onClick={() => handleSave(item)} disabled={saving === item.id} style={{ flex: 1, padding: "9px", background: C.green, color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>บันทึก</button>
-                      <button onClick={() => setEditing(null)} style={{ flex: 1, padding: "9px", background: C.bg, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: F }}>ยกเลิก</button>
-                      <button onClick={() => setDeleteConfirm(item.id)} style={{ padding: "9px 14px", background: C.redL, color: C.red, border: `1px solid #F5B4AE`, borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>🗑 ลบ</button>
+                      <button onClick={() => handleSave(item)} disabled={saving === item.id} style={{ flex: 1, padding: "9px", background: C.greenSolid, color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>บันทึก</button>
+                      <button onClick={() => setEditing(null)} style={{ flex: 1, padding: "9px", background: C.card2, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: F }}>ยกเลิก</button>
+                      <button onClick={() => setDeleteConfirm(item.id)} style={{ padding: "9px 14px", background: C.redBg, color: C.red, border: `1px solid ${C.redBorder}`, borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>🗑 ลบ</button>
                     </div>
                     {deleteConfirm === item.id && (
-                      <div style={{ marginTop: 8, padding: "12px", background: C.redL, borderRadius: 10, border: `1px solid #F5B4AE` }}>
+                      <div style={{ marginTop: 8, padding: "12px", background: C.redBg, borderRadius: 10, border: `1px solid ${C.redBorder}` }}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: C.red, marginBottom: 8 }}>⚠️ ลบ &quot;{item.name}&quot; ถาวร?</div>
                         <div style={{ display: "flex", gap: 8 }}>
-                          <button onClick={() => handleDeleteMenu(item)} style={{ flex: 1, padding: "8px", background: C.red, color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: F }}>ยืนยันลบ</button>
+                          <button onClick={() => handleDeleteMenu(item)} style={{ flex: 1, padding: "8px", background: C.redSolid, color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: F }}>ยืนยันลบ</button>
                           <button onClick={() => setDeleteConfirm(null)} style={{ flex: 1, padding: "8px", background: C.card, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: F }}>ไม่ลบ</button>
                         </div>
                       </div>
@@ -716,14 +739,14 @@ export default function KitchenPage() {
             <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
               {[1,7,30].map(d => (
                 <button key={d} onClick={() => setHdays(d)}
-                  style={{ flex: 1, padding: "10px 0", border: `1.5px solid ${hdays === d ? C.green : C.border}`, borderRadius: 12, background: hdays === d ? C.greenL : C.card, color: hdays === d ? C.green : C.muted, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: F }}>
+                  style={{ flex: 1, padding: "10px 0", border: `1px solid ${hdays === d ? C.greenBorder : C.border}`, borderRadius: 12, background: hdays === d ? C.greenBg : C.card, color: hdays === d ? C.green : C.muted, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: F }}>
                   {d === 1 ? "วันนี้" : `${d} วัน`}
                 </button>
               ))}
             </div>
 
             {/* สรุปวันนี้ */}
-            <div style={{ background: C.greenL, borderRadius: 16, padding: "14px 16px", marginBottom: 14, border: `1.5px solid ${C.greenB}` }}>
+            <div style={{ background: C.greenBg, borderRadius: 16, padding: "14px 16px", marginBottom: 14, border: `1px solid ${C.greenBorder}` }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: C.green, marginBottom: 8 }}>📊 สรุปวันนี้</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                 {[
@@ -732,7 +755,7 @@ export default function KitchenPage() {
                   { label: "รายได้",  val: `${todayDone.reduce((s,o) => s+o.total,0).toLocaleString()}฿`, color: C.green },
                 ].map(s => (
                   <div key={s.label} style={{ background: C.card, borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: s.color }}>{s.val}</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: s.color }}>{s.val}</div>
                     <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginTop: 2 }}>{s.label}</div>
                   </div>
                 ))}
@@ -746,7 +769,7 @@ export default function KitchenPage() {
                 { label: "ยกเลิก",    val: cancelOrders.length,    color: C.red },
               ].map(s => (
                 <div key={s.label} style={{ background: C.card, borderRadius: 14, padding: "12px 8px", textAlign: "center", border: `1px solid ${C.border}` }}>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.val}</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: s.color }}>{s.val}</div>
                   <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginTop: 2 }}>{s.label}</div>
                 </div>
               ))}
@@ -758,13 +781,13 @@ export default function KitchenPage() {
               const isDone   = o.status === "done";
               const isCancel = o.status === ("cancelled" as any);
               return (
-                <div key={o.id} style={{ background: C.card, border: `1px solid ${isCancel ? "#FBBFBF" : C.border}`, borderRadius: 14, padding: "12px 14px", marginBottom: 8 }}>
+                <div key={o.id} style={{ background: C.card, border: `1px solid ${isCancel ? C.redBorder : C.border}`, borderRadius: 14, padding: "12px 14px", marginBottom: 8 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                     <div>
                       <span style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{o.customer_name}</span>
                       <span style={{ fontSize: 12, color: C.muted, marginLeft: 8 }}>#{String(o.id).padStart(4,"0")}</span>
                     </div>
-                    <span style={{ fontSize: 12, fontWeight: 700, background: isDone ? C.greenL : isCancel ? C.redL : C.amberL, color: isDone ? C.green : isCancel ? C.red : C.amber, padding: "3px 10px", borderRadius: 10 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, background: isDone ? C.greenBg : isCancel ? C.redBg : C.amberBg, color: isDone ? C.green : isCancel ? C.red : C.amber, padding: "3px 10px", borderRadius: 10 }}>
                       {isDone ? "✅ เสร็จ" : isCancel ? "❌ ยกเลิก" : "🟡 ค้าง"}
                     </span>
                   </div>
