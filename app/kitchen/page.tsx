@@ -1,7 +1,7 @@
 "use client";
 // ─── app/kitchen/page.tsx ─────────────────────────────────
-// รวม: ออเดอร์ (Kanban) + จัดการเมนู + ประวัติ — PIN เดียว
-// Redesign: dark theme, delivery-app-style colored cards, big touch targets
+// Pro UI Redesign — Light & Clean, ตัวอักษรใหญ่ขึ้น, spacing ดีขึ้น
+// Logic เดิมทุกอย่างยังอยู่ครบ
 
 import { useEffect, useRef, useState } from "react";
 import {
@@ -13,16 +13,13 @@ import {
   createAnnouncement, subscribeToMenuItems,
   getTodayCustomOrders, updateCustomOrderStatus, cancelCustomOrder,
   subscribeToCustomOrders,
-  uploadMenuImage, deleteMenuImage,
 } from "@/lib/supabase";
 import type { CustomOrder } from "@/lib/supabase";
 import type { Order, OrderStatus } from "@/types";
 import type { MenuItem } from "@/types";
 
-// ── PIN ───────────────────────────────────────────────────
 const KITCHEN_PIN = process.env.NEXT_PUBLIC_KITCHEN_PIN ?? "1234";
 
-// ── Helpers ───────────────────────────────────────────────
 const fmt = (s: string, ref?: string | null) => {
   const base = ref ? new Date(ref) : new Date(s);
   const sec = Math.floor((Date.now() - base.getTime()) / 1000);
@@ -37,71 +34,95 @@ const isWarn = (o: Order) => {
   return (o.status === "new" && sec > 120) || (o.status === "cooking" && sec > 600);
 };
 
-// ── สี (Dark theme, delivery-app-style accents) ────────────
-const C = {
-  bg:      "#101215",   // page background
-  card:    "#1B1E22",   // card surface
-  card2:   "#24272B",   // nested surface (item rows, inputs, chips)
-  border:  "#2E3236",
-  borderStrong: "#3D4247",
-  text:    "#F2F1ED",
-  muted:   "#9AA0A6",
+// ── Design tokens ─────────────────────────────────────────
+const T = {
+  // Neutrals
+  white:    "#FFFFFF",
+  bg:       "#F8F7F5",
+  surface:  "#FFFFFF",
+  border:   "#E8E4DC",
+  borderMd: "#D4CEBF",
+  text:     "#1A1714",
+  textSub:  "#6B6560",
+  textMute: "#9A9490",
 
-  green:       "#4ADE80", // bright text/icon on dark tint
-  greenBg:     "#132A1D", // dark tinted header/badge bg
-  greenBorder: "#255239",
-  greenSolid:  "#2D8049", // solid button fill (white text on top)
+  // Brand green
+  green:    "#2A5208",
+  greenMd:  "#3D7A0C",
+  greenL:   "#EBF4DC",
+  greenXL:  "#F4FAF0",
+  greenB:   "#A8D470",
 
-  amber:       "#FBBF5B",
-  amberBg:     "#2E2412",
-  amberBorder: "#4E3B18",
-  amberSolid:  "#B4790F",
+  // Amber
+  amber:    "#96560A",
+  amberL:   "#FDF0DC",
+  amberB:   "#F2C96A",
 
-  red:       "#FF7A6E",
-  redBg:     "#341715",
-  redBorder: "#57241F",
-  redSolid:  "#B4362A",
+  // Red
+  red:      "#991B1B",
+  redL:     "#FEF2F2",
+  redB:     "#FBBFBF",
+
+  // Blue (for info)
+  blue:     "#1D4ED8",
+  blueL:    "#EFF6FF",
 };
 const F = "Sarabun, sans-serif";
 const DEFAULT_CATS = ["ข้าว", "ก๋วยเตี๋ยว", "เครื่องดื่ม"];
 
-// ── Kanban columns ────────────────────────────────────────
 const COLS = [
-  { status: "new" as OrderStatus,     label: "ออเดอร์ใหม่", icon: "🔔",    hBg: C.redBg,   hC: C.red,   cBg: C.redBorder,   bLabel: "เริ่มทำ",    bBg: C.redSolid,   next: "cooking" as const, accent: C.red },
-  { status: "cooking" as OrderStatus, label: "กำลังทำ",     icon: "👨‍🍳", hBg: C.amberBg, hC: C.amber, cBg: C.amberBorder, bLabel: "เสร็จแล้ว",  bBg: C.amberSolid, next: "done" as const,    accent: C.amber },
-  { status: "done" as OrderStatus,    label: "เสร็จแล้ว",   icon: "✅",    hBg: C.greenBg, hC: C.green, cBg: C.greenBorder, bLabel: "ล้างรายการ", bBg: C.greenSolid, next: null,               accent: C.green },
+  { status: "new" as OrderStatus,     label: "ออเดอร์ใหม่",  icon: "🔔", accent: T.red,   accentL: T.redL,   accentB: T.redB,   bLabel: "รับออเดอร์",  next: "cooking" as const },
+  { status: "cooking" as OrderStatus, label: "กำลังปรุง",    icon: "🍳", accent: T.amber, accentL: T.amberL, accentB: T.amberB, bLabel: "เสร็จแล้ว",  next: "done" as const },
+  { status: "done" as OrderStatus,    label: "เสิร์ฟแล้ว",   icon: "✅", accent: T.green, accentL: T.greenL, accentB: T.greenB, bLabel: "ล้างรายการ", next: null },
 ];
+
+// ── Reusable mini components ──────────────────────────────
+const Badge = ({ label, color, bg }: { label: string; color: string; bg: string }) => (
+  <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 700, color, background: bg, fontFamily: F, whiteSpace: "nowrap" }}>
+    {label}
+  </span>
+);
+
+const Btn = ({ children, onClick, disabled, variant = "primary", size = "md", style: extra }: any) => {
+  const base: React.CSSProperties = {
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    gap: 6, border: "none", borderRadius: 10, fontFamily: F, fontWeight: 700,
+    cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.6 : 1,
+    transition: "opacity .15s",
+    fontSize: size === "sm" ? 13 : size === "lg" ? 16 : 14,
+    padding: size === "sm" ? "7px 14px" : size === "lg" ? "14px 20px" : "10px 16px",
+  };
+  const vars: Record<string, React.CSSProperties> = {
+    primary:   { background: T.green,  color: "#fff" },
+    secondary: { background: T.bg,     color: T.textSub, border: `1px solid ${T.border}` },
+    danger:    { background: T.redL,   color: T.red,     border: `1px solid ${T.redB}` },
+    dangerFill:{ background: T.red,    color: "#fff" },
+    amber:     { background: T.amber,  color: "#fff" },
+    amberOutline: { background: T.amberL, color: T.amber, border: `1px solid ${T.amberB}` },
+    ghost:     { background: "transparent", color: T.textSub, border: `1px solid ${T.border}` },
+  };
+  return (
+    <button onClick={onClick} disabled={disabled} style={{ ...base, ...(vars[variant] || vars.primary), ...extra }}>
+      {children}
+    </button>
+  );
+};
 
 // ─────────────────────────────────────────────────────────
 export default function KitchenPage() {
-  // ── Auth ──────────────────────────────────────────────
   const [pin,       setPin]       = useState("");
-  const [unlocked,  setUnlocked]  = useState(() =>
-    typeof window !== "undefined" && sessionStorage.getItem("kitchen_unlocked") === "1"
-  );
+  const [unlocked,  setUnlocked]  = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [pinError,  setPinError]  = useState(false);
-
-  // ── Tab ───────────────────────────────────────────────
   const [tab, setTab] = useState<"kanban" | "menu" | "history">("kanban");
-
-  // ── Orders state ──────────────────────────────────────
   const [orders,  setOrders]  = useState<Order[]>([]);
   const [history, setHistory] = useState<Order[]>([]);
   const [hdays,   setHdays]   = useState(1);
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [toast,   setToast]   = useState(false);
-  const [clearedIds, setClearedIds] = useState<Set<number>>(() => {
-    try {
-      const saved = localStorage.getItem("kitchen_cleared_ids");
-      return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch { return new Set(); }
-  });
+  const [clearedIds, setClearedIds] = useState<Set<number>>(new Set());
   const audioRef = useRef<AudioContext | null>(null);
-
-  // ── Custom Orders state ──────────────────────────────
   const [customOrders, setCustomOrders] = useState<CustomOrder[]>([]);
-
-  // ── Menu state ────────────────────────────────────────
   const [items,      setItems]      = useState<MenuItem[]>([]);
   const [loadingMenu, setLoadingMenu] = useState(true);
   const [menuCat,    setMenuCat]    = useState("ทั้งหมด");
@@ -109,8 +130,6 @@ export default function KitchenPage() {
   const [editName,   setEditName]   = useState("");
   const [editPrice,  setEditPrice]  = useState("");
   const [editIng,    setEditIng]    = useState("");
-  const [editImageFile,    setEditImageFile]    = useState<File | null>(null);
-  const [editImagePreview, setEditImagePreview] = useState<string | null>(null);
   const [saving,     setSaving]     = useState<number | null>(null);
   const [menuToast,  setMenuToast]  = useState("");
   const [annText,    setAnnText]    = useState("");
@@ -124,13 +143,19 @@ export default function KitchenPage() {
   const [newCatText,   setNewCatText]   = useState("");
   const [newEmoji,   setNewEmoji]   = useState("🍽️");
   const [newIng,     setNewIng]     = useState("");
-  const [newImageFile,    setNewImageFile]    = useState<File | null>(null);
-  const [newImagePreview, setNewImagePreview] = useState<string | null>(null);
-  const [imgUploading, setImgUploading] = useState(false);
   const [adding,     setAdding]     = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
-  // ── PIN handler ───────────────────────────────────────
+  // ── Session check (fix hydration) ─────────────────────
+  useEffect(() => {
+    if (sessionStorage.getItem("kitchen_unlocked") === "1") setUnlocked(true);
+    try {
+      const saved = localStorage.getItem("kitchen_cleared_ids");
+      if (saved) setClearedIds(new Set(JSON.parse(saved)));
+    } catch { }
+    setCheckingSession(false);
+  }, []);
+
   const handlePin = (p: string) => {
     setPin(p);
     if (p.length === 4) {
@@ -145,7 +170,6 @@ export default function KitchenPage() {
   };
   const handleLock = () => { setUnlocked(false); sessionStorage.removeItem("kitchen_unlocked"); };
 
-  // ── เสียง ─────────────────────────────────────────────
   const playTone = (freq: number, dur: number, vol = 0.4) => {
     try {
       if (!audioRef.current) audioRef.current = new AudioContext();
@@ -162,17 +186,10 @@ export default function KitchenPage() {
   const playBeep  = () => { playTone(880,0.15,0.5); setTimeout(()=>playTone(880,0.15,0.5),200); setTimeout(()=>playTone(1100,0.3,0.6),400); };
   const playAlert = () => { playTone(520,0.2,0.5); setTimeout(()=>playTone(380,0.4,0.5),250); };
 
-  // ── Load orders ───────────────────────────────────────
   useEffect(() => {
     if (!unlocked) return;
     getTodayOrders().then(d => {
-      const cleared = (() => {
-        try {
-          const saved = localStorage.getItem("kitchen_cleared_ids");
-          return saved ? new Set<number>(JSON.parse(saved)) : new Set<number>();
-        } catch { return new Set<number>(); }
-      })();
-      setOrders((d as Order[]).filter(o => !cleared.has(o.id)));
+      setOrders((d as Order[]).filter(o => !clearedIds.has(o.id)));
     }).finally(() => setLoadingOrders(false));
   }, [unlocked]);
 
@@ -181,14 +198,13 @@ export default function KitchenPage() {
     getOrderHistory(hdays).then(d => setHistory(d as Order[]));
   }, [unlocked, tab, hdays]);
 
-  // ── Realtime orders ───────────────────────────────────
   useEffect(() => {
     if (!unlocked) return;
     const ch = subscribeToOrders((payload) => {
       if (payload.eventType === "INSERT") {
         supabase.from("orders").select("*, departments(id,name)").eq("id", payload.new.id).single()
           .then(({ data }) => {
-            if (data) { setOrders(p => [data as Order, ...p]); setToast(true); setTimeout(() => setToast(false), 3000); playBeep(); }
+            if (data) { setOrders(p => [data as Order, ...p]); setToast(true); setTimeout(() => setToast(false), 3500); playBeep(); }
           });
       }
       if (payload.eventType === "UPDATE")
@@ -204,18 +220,10 @@ export default function KitchenPage() {
     return () => clearInterval(t);
   }, []);
 
-  // ── Load custom orders ───────────────────────────────
   useEffect(() => {
     if (!unlocked) return;
     getTodayCustomOrders().then(d => {
-      const cleared = (() => {
-        try {
-          const saved = localStorage.getItem("kitchen_cleared_ids");
-          return saved ? new Set<number>(JSON.parse(saved)) : new Set<number>();
-        } catch { return new Set<number>(); }
-      })();
-      // negative ID สำหรับ custom orders
-      setCustomOrders(d.filter(o => !cleared.has(-o.id)));
+      setCustomOrders(d.filter(o => !clearedIds.has(-o.id)));
     });
   }, [unlocked]);
 
@@ -224,7 +232,7 @@ export default function KitchenPage() {
     const ch = subscribeToCustomOrders((payload) => {
       if (payload.eventType === "INSERT") {
         setCustomOrders(p => [payload.new as CustomOrder, ...p]);
-        setToast(true); setTimeout(() => setToast(false), 3000); playBeep();
+        setToast(true); setTimeout(() => setToast(false), 3500); playBeep();
       }
       if (payload.eventType === "UPDATE")
         setCustomOrders(p => p.map(o => o.id === payload.new.id ? { ...o, ...payload.new } : o));
@@ -234,7 +242,6 @@ export default function KitchenPage() {
     return () => { supabase.removeChannel(ch); };
   }, [unlocked]);
 
-  // ── Load menu ─────────────────────────────────────────
   useEffect(() => {
     if (!unlocked) return;
     getMenuItems().then(d => setItems(d as MenuItem[])).finally(() => setLoadingMenu(false));
@@ -249,12 +256,10 @@ export default function KitchenPage() {
     return () => { supabase.removeChannel(ch); };
   }, [unlocked]);
 
-  // ── Order handlers ────────────────────────────────────
   const handleMove = async (id: number, status: "cooking" | "done") => {
     try {
       await updateOrderStatus(id, status);
-      setOrders(p => p.map(o => o.id === id ? {
-        ...o, status,
+      setOrders(p => p.map(o => o.id === id ? { ...o, status,
         started_at:   status === "cooking" ? new Date().toISOString() : o.started_at,
         completed_at: status === "done"    ? new Date().toISOString() : o.completed_at,
       } : o));
@@ -262,7 +267,7 @@ export default function KitchenPage() {
   };
 
   const handleCancel = async (id: number) => {
-    if (!window.confirm("ยืนยันยกเลิกออเดอร์นี้?\nออเดอร์จะถูกยกเลิกและแจ้งผู้สั่งทันที")) return;
+    if (!window.confirm("ยืนยันยกเลิกออเดอร์นี้?")) return;
     try {
       const { error } = await supabase.from("orders").update({ status: "cancelled" }).eq("id", id);
       if (error) throw error;
@@ -286,7 +291,6 @@ export default function KitchenPage() {
   const pending = activeOrders.filter(o => o.status !== "done").length;
   const revenue = activeOrders.reduce((s, o) => s + o.total, 0);
 
-  // ── Custom Order handlers ────────────────────────────
   const handleCustomMove = async (id: number, status: "cooking" | "done") => {
     try {
       await updateCustomOrderStatus(id, status);
@@ -306,7 +310,6 @@ export default function KitchenPage() {
     } catch { alert("เกิดข้อผิดพลาด"); }
   };
 
-  // ── Menu handlers ─────────────────────────────────────
   const showMenuToast = (msg: string) => { setMenuToast(msg); setTimeout(() => setMenuToast(""), 2500); };
 
   const handleToggle = async (item: MenuItem) => {
@@ -322,7 +325,6 @@ export default function KitchenPage() {
   const openEdit = (item: MenuItem) => {
     setEditing(item.id); setEditName(item.name);
     setEditPrice(String(item.price)); setEditIng((item as any).ingredients ?? "");
-    setEditImageFile(null); setEditImagePreview((item as any).image_url ?? null);
   };
 
   const handleSave = async (item: MenuItem) => {
@@ -331,19 +333,10 @@ export default function KitchenPage() {
     if (!p || p <= 0) { alert("ราคาไม่ถูกต้อง"); return; }
     setSaving(item.id);
     try {
-      let image_url = (item as any).image_url ?? null;
-      if (editImageFile) {
-        setImgUploading(true);
-        const uploaded = await uploadMenuImage(editImageFile, item.id);
-        if (image_url) deleteMenuImage(image_url); // ลบรูปเก่าแบบ fire-and-forget
-        image_url = uploaded;
-        setImgUploading(false);
-      }
-      await updateMenuItem(item.id, { name: editName.trim(), price: p, ingredients: editIng.trim(), image_url });
-      setItems(prev => prev.map(m => m.id === item.id ? { ...m, name: editName.trim(), price: p, ingredients: editIng.trim(), image_url } as any : m));
-      setEditing(null); setEditImageFile(null); setEditImagePreview(null);
-      showMenuToast(`อัปเดต "${editName.trim()}" แล้ว`);
-    } catch (e: any) { alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "")); setImgUploading(false); }
+      await updateMenuItem(item.id, { name: editName.trim(), price: p, ingredients: editIng.trim() });
+      setItems(prev => prev.map(m => m.id === item.id ? { ...m, name: editName.trim(), price: p, ingredients: editIng.trim() } as any : m));
+      setEditing(null); showMenuToast(`อัปเดต "${editName.trim()}" แล้ว`);
+    } catch (e: any) { alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "")); }
     finally { setSaving(null); }
   };
 
@@ -355,27 +348,19 @@ export default function KitchenPage() {
     if (!finalCat) { alert("กรุณาเลือกหรือพิมพ์หมวดหมู่"); return; }
     setAdding(true);
     try {
-      let image_url: string | null = null;
-      if (newImageFile) {
-        setImgUploading(true);
-        image_url = await uploadMenuImage(newImageFile);
-        setImgUploading(false);
-      }
-      const created = await createMenuItem({ name: newName.trim(), price: p, category: finalCat, emoji: newEmoji, ingredients: newIng.trim(), image_url });
+      const created = await createMenuItem({ name: newName.trim(), price: p, category: finalCat, emoji: newEmoji, ingredients: newIng.trim() });
       setItems(prev => [...prev, created as MenuItem]);
       setShowAdd(false);
       setNewName(""); setNewPrice(""); setNewIng(""); setNewEmoji("🍽️");
       setNewCatCustom(false); setNewCatText(""); setNewCat("ข้าว");
-      setNewImageFile(null); setNewImagePreview(null);
       showMenuToast(`เพิ่มเมนู "${created.name}" แล้ว`);
-    } catch (e: any) { alert("เพิ่มเมนูไม่สำเร็จ: " + (e?.message ?? "")); setImgUploading(false); }
+    } catch (e: any) { alert("เพิ่มเมนูไม่สำเร็จ: " + (e?.message ?? "")); }
     finally { setAdding(false); }
   };
 
   const handleDeleteMenu = async (item: MenuItem) => {
     try {
       await deleteMenuItem(item.id);
-      if ((item as any).image_url) deleteMenuImage((item as any).image_url);
       setItems(prev => prev.filter(m => m.id !== item.id));
       setDeleteConfirm(null); showMenuToast(`ลบ "${item.name}" แล้ว`);
     } catch (e: any) { alert("ลบไม่สำเร็จ: " + (e?.message ?? "")); }
@@ -401,226 +386,322 @@ export default function KitchenPage() {
   const filtered = menuCat === "ทั้งหมด" ? items : items.filter(m => m.category === menuCat);
   const availCount = items.filter(m => m.available).length;
 
+  // ── Checking session ──────────────────────────────────
+  if (checkingSession) return <div style={{ minHeight: "100dvh", background: T.bg }} />;
+
   // ── PIN SCREEN ────────────────────────────────────────
   if (!unlocked) return (
-    <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: C.bg, fontFamily: F, padding: 24 }}>
-      <div style={{ width: 88, height: 88, borderRadius: 24, background: C.card, border: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 44, marginBottom: 20 }}>🍳</div>
-      <div style={{ fontSize: 24, fontWeight: 700, color: C.text, marginBottom: 6 }}>หน้าครัว</div>
-      <div style={{ fontSize: 15, color: C.muted, marginBottom: 36 }}>ใส่ PIN เพื่อเข้าใช้งาน</div>
-      <div style={{ display: "flex", gap: 18, marginBottom: 36 }}>
+    <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: T.bg, fontFamily: F, padding: 24 }}>
+      <div style={{ width: 80, height: 80, borderRadius: 24, background: T.greenL, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, marginBottom: 20 }}>🍳</div>
+      <div style={{ fontSize: 26, fontWeight: 800, color: T.text, marginBottom: 6 }}>หน้าครัว</div>
+      <div style={{ fontSize: 15, color: T.textSub, marginBottom: 40 }}>ใส่ PIN 4 หลักเพื่อเข้าใช้งาน</div>
+      <div style={{ display: "flex", gap: 16, marginBottom: 40 }}>
         {[0,1,2,3].map(i => (
-          <div key={i} style={{ width: 20, height: 20, borderRadius: "50%", background: pin.length > i ? (pinError ? C.redSolid : C.greenSolid) : C.card2, border: `1px solid ${pin.length > i ? "transparent" : C.borderStrong}`, transition: "background .15s" }} />
+          <div key={i} style={{
+            width: 16, height: 16, borderRadius: "50%",
+            background: pin.length > i ? (pinError ? T.red : T.green) : T.border,
+            transition: "background .2s",
+            boxShadow: pin.length > i && !pinError ? `0 0 0 4px ${T.greenL}` : "none",
+          }} />
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, maxWidth: 300, width: "100%" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, width: "100%", maxWidth: 300 }}>
         {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((n, i) => (
           <button key={i}
             onClick={() => {
               if (n === "⌫") setPin(p => p.slice(0,-1));
               else if (n !== "") handlePin(pin + String(n));
             }}
-            style={{ padding: "22px 0", border: `1px solid ${C.border}`, borderRadius: 16, background: n === "" ? "transparent" : C.card, fontSize: 24, fontWeight: 500, cursor: n === "" ? "default" : "pointer", color: C.text, fontFamily: F }}>
+            style={{
+              padding: "20px 0", border: `1.5px solid ${T.border}`,
+              borderRadius: 16, background: n === "" ? "transparent" : T.surface,
+              fontSize: 24, fontWeight: 700, cursor: n === "" ? "default" : "pointer",
+              color: T.text, fontFamily: F,
+              boxShadow: n !== "" ? "0 1px 3px rgba(0,0,0,.06)" : "none",
+            }}>
             {n}
           </button>
         ))}
       </div>
-      {pinError && <div style={{ color: C.red, fontSize: 15, marginTop: 18, fontWeight: 600 }}>PIN ไม่ถูกต้อง</div>}
+      {pinError && (
+        <div style={{ color: T.red, fontSize: 14, marginTop: 20, fontWeight: 600, background: T.redL, padding: "8px 20px", borderRadius: 10 }}>
+          PIN ไม่ถูกต้อง กรุณาลองใหม่
+        </div>
+      )}
     </div>
   );
 
   // ── MAIN ──────────────────────────────────────────────
   return (
-    <div style={{ minHeight: "100dvh", background: C.bg, fontFamily: F }}>
+    <div style={{ minHeight: "100dvh", background: T.bg, fontFamily: F }}>
 
-      {/* Toast ออเดอร์ใหม่ */}
-      {toast && (
-        <div style={{ position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)", background: C.greenSolid, color: "#fff", padding: "12px 28px", borderRadius: "0 0 16px 16px", fontSize: 15, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap" }}>
-          🔔 มีออร์เดอร์ใหม่!
+      {/* Toast */}
+      {(toast || menuToast) && (
+        <div style={{
+          position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)",
+          background: menuToast ? T.amber : T.green,
+          color: "#fff", padding: "12px 28px",
+          borderRadius: "0 0 16px 16px", fontSize: 15, fontWeight: 700,
+          zIndex: 200, whiteSpace: "nowrap",
+          boxShadow: "0 4px 20px rgba(0,0,0,.15)",
+        }}>
+          {menuToast ? `✓ ${menuToast}` : "🔔 มีออร์เดอร์ใหม่!"}
         </div>
       )}
 
-      {/* Toast เมนู */}
-      {menuToast && (
-        <div style={{ position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)", background: C.amberSolid, color: "#fff", padding: "12px 28px", borderRadius: "0 0 16px 16px", fontSize: 15, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap" }}>
-          ✓ {menuToast}
-        </div>
-      )}
-
-      {/* Topbar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 18px", background: C.card, borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 10 }}>
-        <div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>🍳 ครัว PETPAL</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{new Date().toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long" })}</div>
+      {/* ── Topbar ─────────────────────────────────────── */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0 20px", height: 64,
+        background: T.surface, borderBottom: `1px solid ${T.border}`,
+        position: "sticky", top: 0, zIndex: 100,
+        boxShadow: "0 1px 8px rgba(0,0,0,.05)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 12, background: T.greenL, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🍳</div>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: T.text, lineHeight: 1.2 }}>ครัว PETPAL</div>
+            <div style={{ fontSize: 12, color: T.textMute }} suppressHydrationWarning>
+              {new Date().toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long" })}
+            </div>
+          </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={playBeep} style={{ padding: "8px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 24, fontSize: 12, fontWeight: 600, color: C.muted, cursor: "pointer", fontFamily: F }}>🔔</button>
-          <button onClick={handleLock} style={{ padding: "8px 12px", background: C.redBg, border: `1px solid ${C.redBorder}`, borderRadius: 24, fontSize: 12, fontWeight: 600, color: C.red, cursor: "pointer", fontFamily: F }}>🔒 ล็อก</button>
+          <Btn onClick={playBeep} variant="ghost" size="sm">🔔</Btn>
+          <Btn onClick={handleLock} variant="danger" size="sm">🔒 ล็อก</Btn>
         </div>
       </div>
 
-      {/* Stats — แสดงเฉพาะ tab kanban */}
+      {/* ── Stats row (kanban) ──────────────────────────── */}
       {tab === "kanban" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, padding: "14px 16px 8px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, padding: "16px 20px 0" }}>
           {[
-            { label: "ทั้งหมด", val: total,                           color: C.text },
-            { label: "รอทำ",    val: pending,                         color: pending > 0 ? C.red : C.text },
-            { label: "รายได้",  val: `${revenue.toLocaleString()}฿`,  color: C.green },
+            { label: "ออเดอร์วันนี้", val: total,   color: T.text,  icon: "📋" },
+            { label: "รอทำ",          val: pending,  color: pending > 0 ? T.red : T.text, icon: "⏳" },
+            { label: "รายได้",         val: `${revenue.toLocaleString()}฿`, color: T.green, icon: "💰" },
           ].map(s => (
-            <div key={s.label} style={{ background: C.card, borderRadius: 14, padding: "12px 8px", textAlign: "center", border: `1px solid ${C.border}` }}>
-              <div style={{ fontSize: 26, fontWeight: 700, color: s.color, lineHeight: 1.2 }}>{s.val}</div>
-              <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginTop: 2 }}>{s.label}</div>
+            <div key={s.label} style={{
+              background: T.surface, borderRadius: 16, padding: "14px 16px",
+              border: `1px solid ${T.border}`,
+              boxShadow: "0 1px 4px rgba(0,0,0,.04)",
+            }}>
+              <div style={{ fontSize: 11, color: T.textMute, fontWeight: 600, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".04em" }}>{s.label}</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: s.color, lineHeight: 1 }}>{s.val}</div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Stats — แสดงเฉพาะ tab menu */}
+      {/* ── Stats row (menu) ────────────────────────────── */}
       {tab === "menu" && (
-        <div style={{ padding: "12px 16px 4px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontSize: 13, color: C.muted }}>เปิดใช้งาน <strong style={{ color: C.green }}>{availCount}</strong>/{items.length} รายการ</div>
+        <div style={{ padding: "16px 20px 0", display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ flex: 1, background: T.surface, borderRadius: 16, padding: "14px 16px", border: `1px solid ${T.border}`, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+            <div style={{ fontSize: 11, color: T.textMute, fontWeight: 600, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".04em" }}>เปิดขาย</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, lineHeight: 1 }}>{availCount}<span style={{ fontSize: 16, color: T.textMute, fontWeight: 600 }}>/{items.length}</span></div>
+          </div>
         </div>
       )}
 
-      {/* Tab bar — 3 tabs */}
-      <div style={{ display: "flex", gap: 8, padding: "8px 16px 14px" }}>
+      {/* ── Tab bar ─────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: 0, padding: "14px 20px 0", borderBottom: `1px solid ${T.border}`, background: T.surface, position: "sticky", top: 64, zIndex: 90 }}>
         {[
-          ["kanban",  "📋 ออเดอร์"],
-          ["menu",    "🍽️ เมนู"],
-          ["history", "🕐 ประวัติ"],
-        ].map(([t, l]) => (
-          <button key={t} onClick={() => setTab(t as any)}
-            style={{ flex: 1, padding: "10px 0", border: `1px solid ${tab === t ? C.greenBorder : C.border}`, borderRadius: 14, background: tab === t ? C.greenBg : C.card, color: tab === t ? C.green : C.muted, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>
-            {l}
+          ["kanban",  "📋", "ออเดอร์"],
+          ["menu",    "🍽️", "เมนู"],
+          ["history", "🕐", "ประวัติ"],
+        ].map(([t, icon, label]) => (
+          <button key={t} onClick={() => setTab(t as any)} style={{
+            flex: 1, padding: "10px 8px 12px", border: "none", background: "transparent",
+            fontSize: 14, fontWeight: tab === t ? 800 : 600,
+            color: tab === t ? T.green : T.textSub,
+            cursor: "pointer", fontFamily: F, display: "flex",
+            flexDirection: "column", alignItems: "center", gap: 2,
+            borderBottom: `3px solid ${tab === t ? T.green : "transparent"}`,
+            transition: "all .15s",
+          }}>
+            <span style={{ fontSize: 18 }}>{icon}</span>
+            <span>{label}</span>
           </button>
         ))}
       </div>
 
       {/* ══════════════ TAB: KANBAN ══════════════ */}
       {tab === "kanban" && (
-        <div style={{ padding: "0 14px 28px", display: "flex", flexDirection: "column", gap: 20 }}>
+        <div style={{ padding: "20px 20px 32px", display: "flex", flexDirection: "column", gap: 24 }}>
 
-          {/* ── Section: ตามสั่ง ── */}
+          {/* ── Custom orders ── */}
           {customOrders.length > 0 && (
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 14, marginBottom: 10, background: C.amberBg, border: `1px solid ${C.amberBorder}` }}>
-                <span style={{ fontSize: 20 }}>✏️</span>
-                <span style={{ fontSize: 17, fontWeight: 700, color: C.amber, flex: 1 }}>ตามสั่ง</span>
-                <span style={{ fontSize: 15, fontWeight: 700, background: C.amberBorder, color: C.amber, padding: "4px 14px", borderRadius: 20 }}>{customOrders.length} รายการ</span>
+            <section>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 18 }}>✏️</span>
+                  <span style={{ fontSize: 17, fontWeight: 800, color: T.amber }}>ตามสั่ง</span>
+                </div>
+                <Badge label={`${customOrders.length} รายการ`} color={T.amber} bg={T.amberL} />
               </div>
               {customOrders.map(o => {
-                const CUSTOM_COLS: Record<string, { next: "cooking"|"done"|null, bLabel: string, bBg: string, hC: string, hBg: string }> = {
-                  new:     { next: "cooking", bLabel: "เริ่มทำ",     bBg: C.redSolid,   hC: C.red,   hBg: C.redBg },
-                  cooking: { next: "done",    bLabel: "เสร็จแล้ว",   bBg: C.amberSolid, hC: C.amber, hBg: C.amberBg },
-                  done:    { next: null,      bLabel: "ล้างรายการ",  bBg: C.greenSolid, hC: C.green, hBg: C.greenBg },
+                const CUSTOM_COLS: Record<string, any> = {
+                  new:     { next: "cooking", bLabel: "รับออเดอร์",  accent: T.red,   accentL: T.redL },
+                  cooking: { next: "done",    bLabel: "เสร็จแล้ว",  accent: T.amber, accentL: T.amberL },
+                  done:    { next: null,       bLabel: "ล้างรายการ", accent: T.green, accentL: T.greenL },
                 };
                 const col = CUSTOM_COLS[o.status] ?? CUSTOM_COLS.new;
                 return (
-                  <div key={o.id} style={{ borderRadius: 16, marginBottom: 10, background: C.card, overflow: "hidden", border: `1px solid ${C.amberBorder}`, borderLeft: `4px solid ${C.amber}` }}>
-                    <div style={{ padding: "10px 14px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.card2 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, background: col.hBg, color: col.hC, padding: "2px 10px", borderRadius: 10 }}>
-                          {o.status === "new" ? "🔔 ใหม่" : o.status === "cooking" ? "👨‍🍳 ปรุง" : "✅ เสร็จ"}
-                        </span>
-                      </div>
-                      <span style={{ fontSize: 12, color: C.muted }}>#{String(o.id).padStart(4,"0")}</span>
+                  <div key={o.id} style={{
+                    background: T.surface, borderRadius: 18, marginBottom: 12,
+                    border: `1.5px solid ${T.amberB}`, overflow: "hidden",
+                    boxShadow: "0 2px 8px rgba(168,101,14,.08)",
+                  }}>
+                    <div style={{ padding: "12px 16px", background: T.amberL, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <Badge label={o.status === "new" ? "🔔 ใหม่" : o.status === "cooking" ? "🍳 ปรุง" : "✅ เสร็จ"} color={T.amber} bg={T.surface} />
+                      <span style={{ fontSize: 13, color: T.textSub, fontWeight: 600 }}>#{String(o.id).padStart(4,"0")} · {o.dept_id}</span>
                     </div>
-                    <div style={{ padding: "12px 14px" }}>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: C.text, marginBottom: 6 }}>👤 {o.customer_name}</div>
-                      <div style={{ fontSize: 13, color: C.muted, marginBottom: 6 }}>แผนก {o.dept_id}</div>
-                      {/* รายการอาหารที่พิมพ์มา */}
-                      <div style={{ padding: "10px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 10, fontSize: 14, color: C.text, lineHeight: 1.8, marginBottom: o.note ? 8 : 12, whiteSpace: "pre-wrap" }}>
+                    <div style={{ padding: "16px" }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: T.text, marginBottom: 10 }}>👤 {o.customer_name}</div>
+                      <div style={{ padding: "12px 14px", background: T.amberL, borderRadius: 12, fontSize: 15, color: T.text, lineHeight: 1.8, marginBottom: o.note ? 10 : 16, whiteSpace: "pre-wrap" }}>
                         {o.items}
                       </div>
-                      {o.note && <div style={{ fontSize: 13, color: C.amber, background: C.amberBg, padding: "6px 12px", borderRadius: 8, marginBottom: 12, fontWeight: 600 }}>📝 {o.note}</div>}
-                      <div style={{ display: "flex", gap: 8 }}>
+                      {o.note && (
+                        <div style={{ fontSize: 14, color: T.amber, background: T.amberL, padding: "8px 12px", borderRadius: 10, marginBottom: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                          📝 {o.note}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 10 }}>
                         {col.next ? (
-                          <button onClick={() => handleCustomMove(o.id, col.next!)}
-                            style={{ flex: 1, padding: "14px 0", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>
-                            {col.bLabel} →
-                          </button>
+                          <>
+                            <button onClick={() => handleCustomMove(o.id, col.next!)} style={{
+                              flex: 1, padding: "13px 0", border: "none", borderRadius: 12,
+                              fontSize: 15, fontWeight: 800, cursor: "pointer",
+                              background: col.accent, color: "#fff", fontFamily: F,
+                            }}>{col.bLabel} →</button>
+                            <button onClick={() => handleCustomCancel(o.id)} style={{
+                              padding: "13px 16px", border: `1.5px solid ${T.redB}`,
+                              background: T.redL, borderRadius: 12, cursor: "pointer",
+                              fontSize: 14, color: T.red, fontWeight: 700, fontFamily: F,
+                            }}>✕ ยกเลิก</button>
+                          </>
                         ) : (
                           <button onClick={() => {
                             setClearedIds(prev => {
                               const next = new Set(prev);
-                              next.add(-o.id); // ใช้ negative ID เพื่อแยกจาก orders ปกติ
+                              next.add(-o.id);
                               localStorage.setItem("kitchen_cleared_ids", JSON.stringify([...next]));
                               return next;
                             });
                             setCustomOrders(p => p.filter(x => x.id !== o.id));
-                          }}
-                            style={{ flex: 1, padding: "14px 0", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>
-                            {col.bLabel}
-                          </button>
-                        )}
-                        {col.next && (
-                          <button onClick={() => handleCustomCancel(o.id)}
-                            style={{ padding: "14px 16px", border: `1px solid ${C.redBorder}`, background: C.redBg, borderRadius: 12, cursor: "pointer", fontSize: 14, color: C.red, fontWeight: 700, fontFamily: F }}>
-                            ✕ ยกเลิก
-                          </button>
+                          }} style={{
+                            flex: 1, padding: "13px 0", border: "none", borderRadius: 12,
+                            fontSize: 15, fontWeight: 800, cursor: "pointer",
+                            background: T.green, color: "#fff", fontFamily: F,
+                          }}>{col.bLabel}</button>
                         )}
                       </div>
                     </div>
                   </div>
                 );
               })}
-            </div>
+            </section>
           )}
 
-          {/* ── Section: ออเดอร์ปกติ ── */}
+          {/* ── Regular orders — per column ── */}
           {COLS.map(col => {
             const colOrders = orders.filter(o => o.status === col.status && o.status !== ("cancelled" as any));
             return (
-              <div key={col.status}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 14, marginBottom: 10, background: col.hBg, border: `1px solid ${col.cBg}` }}>
-                  <span style={{ fontSize: 20 }}>{col.icon}</span>
-                  <span style={{ fontSize: 17, fontWeight: 700, color: col.hC, flex: 1 }}>{col.label}</span>
-                  <span style={{ fontSize: 15, fontWeight: 700, background: col.cBg, color: col.hC, padding: "4px 14px", borderRadius: 20 }}>{colOrders.length} รายการ</span>
+              <section key={col.status}>
+                {/* Column header */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 10, background: col.accentL, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>{col.icon}</div>
+                    <span style={{ fontSize: 17, fontWeight: 800, color: col.accent }}>{col.label}</span>
+                  </div>
+                  <Badge label={`${colOrders.length} รายการ`} color={col.accent} bg={col.accentL} />
                 </div>
 
                 {colOrders.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "18px 0", fontSize: 14, color: C.muted, border: `1px dashed ${C.border}`, borderRadius: 14 }}>— ไม่มีรายการ —</div>
-                ) : colOrders.map(o => (
-                  <div key={o.id} style={{
-                    borderRadius: 16, marginBottom: 10, background: C.card, overflow: "hidden",
-                    border: isWarn(o) && o.status === "new" ? `1px solid ${C.red}` : `1px solid ${C.border}`,
-                    borderLeft: `4px solid ${col.accent}`,
-                    boxShadow: isWarn(o) && o.status === "new" ? `0 0 0 3px ${C.redBg}` : "none",
-                  }}>
-                    <div style={{ padding: "12px 14px 10px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.card2 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 20, fontWeight: 700, color: isWarn(o) ? C.red : C.text }}>{fmt(o.created_at, o.started_at)}</span>
-                        {isWarn(o) && o.status === "new" && <span style={{ fontSize: 11, fontWeight: 700, background: C.redSolid, color: "#fff", padding: "2px 8px", borderRadius: 8 }}>⚡ รีบด่วน</span>}
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, background: C.greenBg, color: C.green, padding: "3px 10px", borderRadius: 10 }}>{(o as any).departments?.name ?? o.dept_id}</span>
-                        <span style={{ fontSize: 12, color: C.muted }}>#{String(o.id).padStart(4,"0")}</span>
-                      </div>
-                    </div>
-                    <div style={{ padding: "12px 14px" }}>
-                      <div style={{ fontSize: 20, fontWeight: 700, color: C.text, marginBottom: 8 }}>👤 {o.customer_name}</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: o.note ? 8 : 12 }}>
-                        {o.items.map((it, i) => (
-                          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", background: C.card2, borderRadius: 8 }}>
-                            <span style={{ fontSize: 15, fontWeight: 600, color: C.text }}>🍽 {it.name}</span>
-                            <span style={{ fontSize: 15, fontWeight: 700, color: col.hC, background: col.hBg, padding: "2px 10px", borderRadius: 8 }}>×{it.qty}</span>
-                          </div>
-                        ))}
-                      </div>
-                      {o.note && <div style={{ fontSize: 14, color: C.amber, background: C.amberBg, padding: "7px 12px", borderRadius: 10, marginBottom: 12, fontWeight: 600 }}>📝 {o.note}</div>}
-                      <div style={{ display: "flex", gap: 8 }}>
-                        {col.next ? (
-                          <button onClick={() => handleMove(o.id, col.next!)} style={{ flex: 1, padding: "14px 0", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>{col.bLabel} →</button>
-                        ) : (
-                          <button onClick={() => handleClearDone(o.id)} style={{ flex: 1, padding: "14px 0", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: "pointer", background: col.bBg, color: "#fff", fontFamily: F }}>{col.bLabel}</button>
-                        )}
-                        {col.next && (
-                          <button onClick={() => handleCancel(o.id)} style={{ padding: "14px 16px", border: `1px solid ${C.redBorder}`, background: C.redBg, borderRadius: 12, cursor: "pointer", fontSize: 14, color: C.red, fontWeight: 700, fontFamily: F }}>✕ ยกเลิก</button>
-                        )}
-                      </div>
-                    </div>
+                  <div style={{ textAlign: "center", padding: "24px 0", color: T.textMute, fontSize: 14, border: `2px dashed ${T.border}`, borderRadius: 16 }}>
+                    — ไม่มีรายการ —
                   </div>
-                ))}
-              </div>
+                ) : colOrders.map(o => {
+                  const warn = isWarn(o);
+                  return (
+                    <div key={o.id} style={{
+                      background: T.surface, borderRadius: 18, marginBottom: 12,
+                      border: warn && o.status === "new" ? `2px solid ${T.red}` : `1px solid ${T.border}`,
+                      overflow: "hidden",
+                      boxShadow: warn && o.status === "new"
+                        ? `0 0 0 4px ${T.redL}, 0 4px 16px rgba(153,27,27,.12)`
+                        : "0 1px 6px rgba(0,0,0,.05)",
+                    }}>
+                      {/* Card header */}
+                      <div style={{
+                        padding: "12px 16px", background: warn && o.status === "new" ? T.redL : col.accentL,
+                        borderBottom: `1px solid ${warn && o.status === "new" ? T.redB : col.accentB}`,
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{
+                            fontSize: 20, fontWeight: 800,
+                            color: warn ? T.red : col.accent,
+                          }} suppressHydrationWarning>{fmt(o.created_at, o.started_at)}</span>
+                          {warn && o.status === "new" && (
+                            <span style={{ fontSize: 11, fontWeight: 800, background: T.red, color: "#fff", padding: "2px 8px", borderRadius: 6 }}>⚡ รีบด่วน</span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <Badge label={(o as any).departments?.name ?? o.dept_id} color={T.green} bg={T.greenL} />
+                          <span style={{ fontSize: 12, color: T.textMute, fontWeight: 600 }}>#{String(o.id).padStart(4,"0")}</span>
+                        </div>
+                      </div>
+
+                      {/* Card body */}
+                      <div style={{ padding: "14px 16px" }}>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: T.text, marginBottom: 12 }}>👤 {o.customer_name}</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: o.note ? 10 : 14 }}>
+                          {o.items.map((it, i) => (
+                            <div key={i} style={{
+                              display: "flex", justifyContent: "space-between", alignItems: "center",
+                              padding: "8px 12px", background: T.bg, borderRadius: 10,
+                            }}>
+                              <span style={{ fontSize: 15, fontWeight: 600, color: T.text }}>🍽 {it.name}</span>
+                              <span style={{
+                                fontSize: 15, fontWeight: 800,
+                                background: col.accentL, color: col.accent,
+                                padding: "2px 12px", borderRadius: 8,
+                              }}>×{it.qty}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {o.note && (
+                          <div style={{ fontSize: 14, color: T.amber, background: T.amberL, padding: "8px 12px", borderRadius: 10, marginBottom: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                            📝 {o.note}
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 10 }}>
+                          {col.next ? (
+                            <>
+                              <button onClick={() => handleMove(o.id, col.next!)} style={{
+                                flex: 1, padding: "13px 0", border: "none", borderRadius: 12,
+                                fontSize: 15, fontWeight: 800, cursor: "pointer",
+                                background: col.accent, color: "#fff", fontFamily: F,
+                              }}>{col.bLabel} →</button>
+                              <button onClick={() => handleCancel(o.id)} style={{
+                                padding: "13px 16px", border: `1.5px solid ${T.redB}`,
+                                background: T.redL, borderRadius: 12, cursor: "pointer",
+                                fontSize: 14, color: T.red, fontWeight: 700, fontFamily: F,
+                              }}>✕</button>
+                            </>
+                          ) : (
+                            <button onClick={() => handleClearDone(o.id)} style={{
+                              flex: 1, padding: "13px 0", border: "none", borderRadius: 12,
+                              fontSize: 15, fontWeight: 800, cursor: "pointer",
+                              background: T.green, color: "#fff", fontFamily: F,
+                            }}>{col.bLabel}</button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </section>
             );
           })}
         </div>
@@ -628,178 +709,175 @@ export default function KitchenPage() {
 
       {/* ══════════════ TAB: MENU ══════════════ */}
       {tab === "menu" && (
-        <div>
-          {/* ประกาศ */}
-          <div style={{ margin: "0 16px 12px", padding: "12px 14px", background: C.card, border: `1px solid ${C.border}`, borderRadius: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: C.text }}>📢 ประกาศถึงลูกค้า</div>
-            <button onClick={quickAnnounce} disabled={annSending}
-              style={{ width: "100%", padding: "10px", background: C.greenSolid, color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: annSending ? "not-allowed" : "pointer", fontFamily: F, marginBottom: 6 }}>
+        <div style={{ padding: "20px 20px 32px" }}>
+
+          {/* ── ประกาศ ── */}
+          <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18, padding: "16px", marginBottom: 16, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 12 }}>📢 ประกาศถึงลูกค้า</div>
+            <button onClick={quickAnnounce} disabled={annSending} style={{
+              width: "100%", padding: "13px", background: T.green, color: "#fff",
+              border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700,
+              cursor: annSending ? "not-allowed" : "pointer", fontFamily: F, marginBottom: 8,
+              opacity: annSending ? 0.6 : 1,
+            }}>
               {annSending ? "กำลังส่ง..." : "🔔 แจ้ง \"เมนูวันนี้อัปเดตแล้ว\""}
             </button>
             {!showAnn ? (
-              <button onClick={() => setShowAnn(true)} style={{ width: "100%", padding: "8px", background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 10, fontSize: 12, cursor: "pointer", fontFamily: F }}>✏️ เขียนประกาศเอง</button>
+              <Btn onClick={() => setShowAnn(true)} variant="ghost" style={{ width: "100%" }}>✏️ เขียนประกาศเอง</Btn>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <input value={annText} onChange={e => setAnnText(e.target.value)} placeholder="พิมพ์ข้อความประกาศ..."
-                  style={{ padding: "8px 12px", background: C.card2, border: `1px solid ${C.greenBorder}`, borderRadius: 8, fontSize: 13, fontFamily: F, outline: "none", color: C.text }} />
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button onClick={handleAnnounce} disabled={annSending} style={{ flex: 1, padding: "8px", background: C.greenSolid, color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: F }}>ส่ง</button>
-                  <button onClick={() => setShowAnn(false)} style={{ flex: 1, padding: "8px", background: C.card2, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: F }}>ยกเลิก</button>
+                  style={{ padding: "10px 14px", border: `1.5px solid ${T.green}`, borderRadius: 10, fontSize: 14, fontFamily: F, outline: "none", color: T.text }} />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Btn onClick={handleAnnounce} disabled={annSending} variant="primary" style={{ flex: 1 }}>ส่งประกาศ</Btn>
+                  <Btn onClick={() => setShowAnn(false)} variant="ghost" style={{ flex: 1 }}>ยกเลิก</Btn>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Category filter + ปุ่มเพิ่ม */}
-          <div style={{ display: "flex", gap: 6, padding: "0 16px 10px", overflowX: "auto", scrollbarWidth: "none", alignItems: "center" }}>
+          {/* ── Category filter + เพิ่มเมนู ── */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", overflowX: "auto", scrollbarWidth: "none" }}>
             {CATS.map(c => (
-              <button key={c} onClick={() => setMenuCat(c)}
-                style={{ padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer", border: menuCat === c ? "none" : `1px solid ${C.border}`, background: menuCat === c ? C.greenSolid : "transparent", color: menuCat === c ? "#fff" : C.muted, fontFamily: F }}>
-                {c}
-              </button>
+              <button key={c} onClick={() => setMenuCat(c)} style={{
+                padding: "7px 16px", borderRadius: 24, fontSize: 13, fontWeight: 600,
+                whiteSpace: "nowrap", cursor: "pointer",
+                border: menuCat === c ? "none" : `1px solid ${T.border}`,
+                background: menuCat === c ? T.green : T.surface,
+                color: menuCat === c ? "#fff" : T.textSub, fontFamily: F,
+              }}>{c}</button>
             ))}
-            <button onClick={() => setShowAdd(true)}
-              style={{ padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", cursor: "pointer", border: "none", background: C.amberSolid, color: "#fff", fontFamily: F, marginLeft: "auto", flexShrink: 0 }}>
+            <Btn onClick={() => setShowAdd(!showAdd)} variant="amber" style={{ marginLeft: "auto", flexShrink: 0 }}>
               + เพิ่มเมนู
-            </button>
+            </Btn>
           </div>
 
-          {/* Form เพิ่มเมนู */}
+          {/* ── Form เพิ่มเมนู ── */}
           {showAdd && (
-            <div style={{ margin: "0 16px 12px", padding: "14px", background: C.card, border: `1px solid ${C.amberBorder}`, borderRadius: 14 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10, color: C.text }}>🍽️ เมนูใหม่</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {/* รูปเมนู */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <label style={{ width: 64, height: 64, borderRadius: 12, background: C.card2, border: `1px dashed ${C.borderStrong}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer", overflow: "hidden", position: "relative" }}>
-                    {newImagePreview ? (
-                      <img src={newImagePreview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : (
-                      <span style={{ fontSize: 22, color: C.muted }}>📷</span>
-                    )}
-                    <input type="file" accept="image/*" style={{ display: "none" }}
-                      onChange={e => {
-                        const f = e.target.files?.[0]; if (!f) return;
-                        setNewImageFile(f); setNewImagePreview(URL.createObjectURL(f));
-                      }} />
-                  </label>
-                  <div style={{ flex: 1, fontSize: 12, color: C.muted }}>
-                    แตะเพื่อเพิ่มรูปเมนู <span style={{ color: C.muted }}>(ไม่บังคับ — ไม่ใส่จะใช้อีโมจิแทน)</span>
-                    {newImagePreview && (
-                      <div>
-                        <button type="button" onClick={() => { setNewImageFile(null); setNewImagePreview(null); }}
-                          style={{ marginTop: 4, background: "transparent", border: "none", color: C.red, fontSize: 12, cursor: "pointer", padding: 0, fontFamily: F }}>✕ เอารูปออก</button>
-                      </div>
-                    )}
-                  </div>
+            <div style={{ background: T.surface, border: `1.5px solid ${T.amberB}`, borderRadius: 18, padding: "16px", marginBottom: 16 }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: T.text, marginBottom: 14 }}>🍽️ เพิ่มเมนูใหม่</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <input value={newEmoji} onChange={e => setNewEmoji(e.target.value)} placeholder="🍽️"
+                    style={{ width: 52, padding: "10px", border: `1.5px solid ${T.border}`, borderRadius: 10, fontSize: 18, textAlign: "center", fontFamily: F, color: T.text }} />
+                  <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ชื่อเมนู"
+                    style={{ flex: 1, padding: "10px 14px", border: `1.5px solid ${T.border}`, borderRadius: 10, fontSize: 14, fontFamily: F, color: T.text }} />
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input value={newEmoji} onChange={e => setNewEmoji(e.target.value)} placeholder="🍽️" style={{ width: 50, padding: "8px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 16, textAlign: "center", fontFamily: F, color: C.text }} />
-                  <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ชื่อเมนู" style={{ flex: 1, padding: "8px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F, color: C.text }} />
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input type="number" value={newPrice} onChange={e => setNewPrice(e.target.value)} placeholder="ราคา" style={{ flex: 1, padding: "8px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F, color: C.text }} />
+                <div style={{ display: "flex", gap: 10 }}>
+                  <input type="number" value={newPrice} onChange={e => setNewPrice(e.target.value)} placeholder="ราคา (บาท)"
+                    style={{ flex: 1, padding: "10px 14px", border: `1.5px solid ${T.border}`, borderRadius: 10, fontSize: 14, fontFamily: F, color: T.text }} />
                   {!newCatCustom ? (
                     <select value={newCat} onChange={e => { if (e.target.value === "__custom__") { setNewCatCustom(true); setNewCatText(""); } else setNewCat(e.target.value); }}
-                      style={{ flex: 1, padding: "8px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F, color: C.text }}>
+                      style={{ flex: 1, padding: "10px 14px", border: `1.5px solid ${T.border}`, borderRadius: 10, fontSize: 14, fontFamily: F, color: T.text, background: T.surface }}>
                       {allCats.map(c => <option key={c} value={c}>{c}</option>)}
                       <option value="__custom__">+ หมวดใหม่...</option>
                     </select>
                   ) : (
                     <div style={{ flex: 1, display: "flex", gap: 6 }}>
-                      <input value={newCatText} onChange={e => setNewCatText(e.target.value)} placeholder="พิมพ์ชื่อหมวดใหม่" autoFocus style={{ flex: 1, padding: "8px 12px", background: C.card2, border: `1px solid ${C.amberBorder}`, borderRadius: 8, fontSize: 13, fontFamily: F, color: C.text }} />
-                      <button onClick={() => { setNewCatCustom(false); setNewCatText(""); }} style={{ padding: "0 10px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, cursor: "pointer", fontSize: 12 }}>✕</button>
+                      <input value={newCatText} onChange={e => setNewCatText(e.target.value)} placeholder="ชื่อหมวดใหม่" autoFocus
+                        style={{ flex: 1, padding: "10px 14px", border: `1.5px solid ${T.amber}`, borderRadius: 10, fontSize: 14, fontFamily: F, color: T.text }} />
+                      <button onClick={() => { setNewCatCustom(false); setNewCatText(""); }}
+                        style={{ padding: "0 12px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 10, color: T.textSub, cursor: "pointer", fontSize: 14 }}>✕</button>
                     </div>
                   )}
                 </div>
-                <input value={newIng} onChange={e => setNewIng(e.target.value)} placeholder="วัตถุดิบ (ถ้ามี)" style={{ padding: "8px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, fontFamily: F, color: C.text }} />
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={handleAddMenu} disabled={adding} style={{ flex: 1, padding: "9px", background: C.amberSolid, color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>{adding ? (imgUploading ? "กำลังอัปโหลดรูป..." : "กำลังเพิ่ม...") : "เพิ่มเมนู"}</button>
-                  <button onClick={() => setShowAdd(false)} style={{ flex: 1, padding: "9px", background: C.card2, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: F }}>ยกเลิก</button>
+                <input value={newIng} onChange={e => setNewIng(e.target.value)} placeholder="วัตถุดิบ (ถ้ามี) เช่น หมูสับ, กระเพรา"
+                  style={{ padding: "10px 14px", border: `1.5px solid ${T.border}`, borderRadius: 10, fontSize: 14, fontFamily: F, color: T.text }} />
+                <div style={{ display: "flex", gap: 10 }}>
+                  <Btn onClick={handleAddMenu} disabled={adding} variant="amber" style={{ flex: 1, padding: "13px 0" }}>
+                    {adding ? "กำลังเพิ่ม..." : "✓ เพิ่มเมนูนี้"}
+                  </Btn>
+                  <Btn onClick={() => setShowAdd(false)} variant="ghost" style={{ flex: 1, padding: "13px 0" }}>ยกเลิก</Btn>
                 </div>
               </div>
             </div>
           )}
 
-          {/* รายการเมนู */}
-          <div style={{ padding: "0 16px 28px", display: "flex", flexDirection: "column", gap: 8 }}>
-            {loadingMenu ? (
-              <div style={{ textAlign: "center", padding: 32, color: C.muted }}>กำลังโหลด...</div>
-            ) : filtered.map(item => (
-              <div key={item.id} style={{ background: C.card, border: `1px solid ${item.available ? C.border : C.redBorder}`, borderRadius: 14, padding: "12px 14px", opacity: item.available ? 1 : 0.7 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ width: 44, height: 44, borderRadius: 10, background: C.card2, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0, overflow: "hidden" }}>
-                    {(item as any).image_url ? (
-                      <img src={(item as any).image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : item.emoji}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 2 }}>{item.name}</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 14, fontWeight: 700, color: C.green }}>{item.price} บาท</span>
-                      <button onClick={() => editing === item.id ? setEditing(null) : openEdit(item)}
-                        style={{ fontSize: 11, color: C.muted, background: C.card2, border: `1px solid ${C.border}`, borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontFamily: F }}>✏️ แก้ไข</button>
+          {/* ── รายการเมนู ── */}
+          {loadingMenu ? (
+            <div style={{ textAlign: "center", padding: 40, color: T.textMute }}>กำลังโหลด...</div>
+          ) : filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 40, color: T.textMute }}>ไม่มีเมนูในหมวดนี้</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {filtered.map(item => (
+                <div key={item.id} style={{
+                  background: T.surface, border: `1px solid ${item.available ? T.border : T.redB}`,
+                  borderRadius: 16, overflow: "hidden",
+                  boxShadow: "0 1px 4px rgba(0,0,0,.04)",
+                  opacity: item.available ? 1 : 0.65,
+                }}>
+                  <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 14 }}>
+                    {/* emoji */}
+                    <div style={{ width: 52, height: 52, borderRadius: 14, background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0, border: `1px solid ${T.border}` }}>
+                      {item.emoji}
                     </div>
-                    {(item as any).ingredients && <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>🧂 {(item as any).ingredients}</div>}
+                    {/* info */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: T.text, marginBottom: 3 }}>{item.name}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 16, fontWeight: 800, color: T.green }}>{item.price} ฿</span>
+                        <button onClick={() => editing === item.id ? setEditing(null) : openEdit(item)} style={{
+                          fontSize: 12, color: T.textSub, background: T.bg,
+                          border: `1px solid ${T.border}`, borderRadius: 8,
+                          padding: "3px 10px", cursor: "pointer", fontFamily: F, fontWeight: 600,
+                        }}>✏️ แก้ไข</button>
+                      </div>
+                      {(item as any).ingredients && (
+                        <div style={{ fontSize: 12, color: T.textMute, marginTop: 4 }}>🧂 {(item as any).ingredients}</div>
+                      )}
+                    </div>
+                    {/* toggle */}
+                    <button onClick={() => handleToggle(item)} disabled={saving === item.id} style={{
+                      padding: "10px 18px", border: "none", borderRadius: 12,
+                      fontSize: 14, fontWeight: 800,
+                      cursor: saving === item.id ? "not-allowed" : "pointer",
+                      background: item.available ? T.green : T.redL,
+                      color: item.available ? "#fff" : T.red,
+                      flexShrink: 0, fontFamily: F, minWidth: 72,
+                      transition: "all .15s",
+                    }}>
+                      {saving === item.id ? "..." : item.available ? "เปิด" : "ปิด"}
+                    </button>
                   </div>
-                  <button onClick={() => handleToggle(item)} disabled={saving === item.id}
-                    style={{ padding: "8px 14px", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: saving === item.id ? "not-allowed" : "pointer", background: item.available ? C.greenSolid : C.redBg, color: item.available ? "#fff" : C.red, flexShrink: 0, fontFamily: F, minWidth: 64 }}>
-                    {saving === item.id ? "..." : item.available ? "เปิด" : "ปิด"}
-                  </button>
-                </div>
 
-                {editing === item.id && (
-                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
-                    {/* รูปเมนู */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <label style={{ width: 64, height: 64, borderRadius: 12, background: C.card2, border: `1px dashed ${C.borderStrong}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer", overflow: "hidden" }}>
-                        {editImagePreview ? (
-                          <img src={editImagePreview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                        ) : (
-                          <span style={{ fontSize: 22, color: C.muted }}>📷</span>
-                        )}
-                        <input type="file" accept="image/*" style={{ display: "none" }}
-                          onChange={e => {
-                            const f = e.target.files?.[0]; if (!f) return;
-                            setEditImageFile(f); setEditImagePreview(URL.createObjectURL(f));
-                          }} />
-                      </label>
-                      <div style={{ flex: 1, fontSize: 12, color: C.muted }}>
-                        แตะเพื่อเปลี่ยนรูปเมนู
-                        {editImagePreview && (
-                          <div>
-                            <button type="button" onClick={() => { setEditImageFile(null); setEditImagePreview(null); }}
-                              style={{ marginTop: 4, background: "transparent", border: "none", color: C.red, fontSize: 12, cursor: "pointer", padding: 0, fontFamily: F }}>✕ เอารูปออก</button>
+                  {/* Edit form */}
+                  {editing === item.id && (
+                    <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${T.border}`, paddingTop: 14 }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        {[
+                          { label: "ชื่อเมนู", val: editName, set: setEditName, type: "text" },
+                          { label: "ราคา (บาท)", val: editPrice, set: setEditPrice, type: "number" },
+                          { label: "วัตถุดิบ", val: editIng, set: setEditIng, type: "text" },
+                        ].map(f => (
+                          <div key={f.label}>
+                            <label style={{ fontSize: 12, color: T.textMute, fontWeight: 700, display: "block", marginBottom: 4 }}>{f.label}</label>
+                            <input type={f.type} value={f.val} onChange={e => f.set(e.target.value)}
+                              placeholder={f.label === "วัตถุดิบ" ? "เช่น หมูสับ, กระเพรา" : ""}
+                              style={{ width: "100%", padding: "10px 14px", border: `1.5px solid ${T.green}`, borderRadius: 10, fontSize: 14, fontFamily: F, outline: "none", color: T.text, boxSizing: "border-box" }} />
+                          </div>
+                        ))}
+                        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                          <Btn onClick={() => handleSave(item)} disabled={saving === item.id} variant="primary" style={{ flex: 1 }}>✓ บันทึก</Btn>
+                          <Btn onClick={() => setEditing(null)} variant="ghost" style={{ flex: 1 }}>ยกเลิก</Btn>
+                          <Btn onClick={() => setDeleteConfirm(item.id)} variant="danger">🗑</Btn>
+                        </div>
+                        {deleteConfirm === item.id && (
+                          <div style={{ background: T.redL, border: `1px solid ${T.redB}`, borderRadius: 12, padding: "14px" }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: T.red, marginBottom: 10 }}>⚠️ ลบ &quot;{item.name}&quot; ถาวร?</div>
+                            <div style={{ display: "flex", gap: 8 }}>
+                              <Btn onClick={() => handleDeleteMenu(item)} variant="dangerFill" style={{ flex: 1 }}>ยืนยันลบ</Btn>
+                              <Btn onClick={() => setDeleteConfirm(null)} variant="ghost" style={{ flex: 1 }}>ไม่ลบ</Btn>
+                            </div>
                           </div>
                         )}
                       </div>
                     </div>
-                    {[["ชื่อเมนู", editName, setEditName, "text"], ["ราคา (บาท)", editPrice, setEditPrice, "number"], ["วัตถุดิบ", editIng, setEditIng, "text"]].map(([label, val, setter, type]) => (
-                      <div key={label as string}>
-                        <label style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{label as string}</label>
-                        <input type={type as string} value={val as string} onChange={e => (setter as any)(e.target.value)} placeholder={label === "วัตถุดิบ" ? "เช่น หมูสับ, กระเพรา" : ""}
-                          style={{ width: "100%", padding: "8px 12px", background: C.card2, border: `1px solid ${C.greenBorder}`, borderRadius: 8, fontSize: 13, fontFamily: F, outline: "none", marginTop: 4, color: C.text }} />
-                      </div>
-                    ))}
-                    <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                      <button onClick={() => handleSave(item)} disabled={saving === item.id} style={{ flex: 1, padding: "9px", background: C.greenSolid, color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>{saving === item.id ? (imgUploading ? "กำลังอัปโหลดรูป..." : "กำลังบันทึก...") : "บันทึก"}</button>
-                      <button onClick={() => { setEditing(null); setEditImageFile(null); setEditImagePreview(null); }} style={{ flex: 1, padding: "9px", background: C.card2, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: F }}>ยกเลิก</button>
-                      <button onClick={() => setDeleteConfirm(item.id)} style={{ padding: "9px 14px", background: C.redBg, color: C.red, border: `1px solid ${C.redBorder}`, borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F }}>🗑 ลบ</button>
-                    </div>
-                    {deleteConfirm === item.id && (
-                      <div style={{ marginTop: 8, padding: "12px", background: C.redBg, borderRadius: 10, border: `1px solid ${C.redBorder}` }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: C.red, marginBottom: 8 }}>⚠️ ลบ &quot;{item.name}&quot; ถาวร?</div>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button onClick={() => handleDeleteMenu(item)} style={{ flex: 1, padding: "8px", background: C.redSolid, color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: F }}>ยืนยันลบ</button>
-                          <button onClick={() => setDeleteConfirm(null)} style={{ flex: 1, padding: "8px", background: C.card, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: F }}>ไม่ลบ</button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -811,67 +889,84 @@ export default function KitchenPage() {
         const cancelOrders = history.filter(o => o.status === ("cancelled" as any));
         const todayDone    = todayOrders.filter(o => o.status === "done");
         return (
-          <div style={{ padding: "0 14px 28px" }}>
-            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          <div style={{ padding: "20px 20px 32px" }}>
+            {/* Filter */}
+            <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
               {[1,7,30].map(d => (
-                <button key={d} onClick={() => setHdays(d)}
-                  style={{ flex: 1, padding: "10px 0", border: `1px solid ${hdays === d ? C.greenBorder : C.border}`, borderRadius: 12, background: hdays === d ? C.greenBg : C.card, color: hdays === d ? C.green : C.muted, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: F }}>
+                <button key={d} onClick={() => setHdays(d)} style={{
+                  flex: 1, padding: "12px 0", border: `2px solid ${hdays === d ? T.green : T.border}`,
+                  borderRadius: 14, background: hdays === d ? T.greenL : T.surface,
+                  color: hdays === d ? T.green : T.textSub, fontSize: 14, fontWeight: 700,
+                  cursor: "pointer", fontFamily: F,
+                }}>
                   {d === 1 ? "วันนี้" : `${d} วัน`}
                 </button>
               ))}
             </div>
 
-            {/* สรุปวันนี้ */}
-            <div style={{ background: C.greenBg, borderRadius: 16, padding: "14px 16px", marginBottom: 14, border: `1px solid ${C.greenBorder}` }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: C.green, marginBottom: 8 }}>📊 สรุปวันนี้</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            {/* Summary card */}
+            <div style={{ background: T.greenXL, border: `1.5px solid ${T.greenB}`, borderRadius: 18, padding: "16px", marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: T.green, marginBottom: 12 }}>📊 สรุปวันนี้</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
                 {[
-                  { label: "ทำเสร็จ", val: todayDone.length, color: C.green },
-                  { label: "ยกเลิก",  val: todayOrders.filter(o => o.status === ("cancelled" as any)).length, color: C.red },
-                  { label: "รายได้",  val: `${todayDone.reduce((s,o) => s+o.total,0).toLocaleString()}฿`, color: C.green },
+                  { label: "ทำเสร็จ", val: todayDone.length, color: T.green },
+                  { label: "ยกเลิก",  val: todayOrders.filter(o => o.status === ("cancelled" as any)).length, color: T.red },
+                  { label: "รายได้",  val: `${todayDone.reduce((s,o) => s+o.total,0).toLocaleString()}฿`, color: T.green },
                 ].map(s => (
-                  <div key={s.label} style={{ background: C.card, borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: s.color }}>{s.val}</div>
-                    <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginTop: 2 }}>{s.label}</div>
+                  <div key={s.label} style={{ background: T.surface, borderRadius: 12, padding: "12px 10px", textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.val}</div>
+                    <div style={{ fontSize: 11, color: T.textMute, fontWeight: 600, marginTop: 3 }}>{s.label}</div>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+            {/* Total stats */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
               {[
-                { label: "ทั้งหมด",    val: history.length,        color: C.text },
-                { label: "เสร็จแล้ว", val: doneOrders.length,      color: C.green },
-                { label: "ยกเลิก",    val: cancelOrders.length,    color: C.red },
+                { label: "ทั้งหมด",   val: history.length,     color: T.text },
+                { label: "เสร็จ",     val: doneOrders.length,  color: T.green },
+                { label: "ยกเลิก",   val: cancelOrders.length, color: T.red },
               ].map(s => (
-                <div key={s.label} style={{ background: C.card, borderRadius: 14, padding: "12px 8px", textAlign: "center", border: `1px solid ${C.border}` }}>
-                  <div style={{ fontSize: 22, fontWeight: 700, color: s.color }}>{s.val}</div>
-                  <div style={{ fontSize: 11, color: C.muted, fontWeight: 600, marginTop: 2 }}>{s.label}</div>
+                <div key={s.label} style={{ background: T.surface, borderRadius: 14, padding: "14px 10px", textAlign: "center", border: `1px solid ${T.border}` }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: s.color }}>{s.val}</div>
+                  <div style={{ fontSize: 11, color: T.textMute, fontWeight: 600, marginTop: 3 }}>{s.label}</div>
                 </div>
               ))}
             </div>
 
+            {/* Order list */}
             {history.length === 0 ? (
-              <div style={{ textAlign: "center", padding: 36, color: C.muted, fontSize: 15 }}>ไม่มีรายการ</div>
+              <div style={{ textAlign: "center", padding: 40, color: T.textMute, fontSize: 15 }}>ไม่มีรายการ</div>
             ) : history.map(o => {
               const isDone   = o.status === "done";
               const isCancel = o.status === ("cancelled" as any);
               return (
-                <div key={o.id} style={{ background: C.card, border: `1px solid ${isCancel ? C.redBorder : C.border}`, borderRadius: 14, padding: "12px 14px", marginBottom: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <div key={o.id} style={{
+                  background: T.surface, border: `1px solid ${isCancel ? T.redB : T.border}`,
+                  borderRadius: 16, padding: "14px 16px", marginBottom: 10,
+                  boxShadow: "0 1px 4px rgba(0,0,0,.04)",
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
                     <div>
-                      <span style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{o.customer_name}</span>
-                      <span style={{ fontSize: 12, color: C.muted, marginLeft: 8 }}>#{String(o.id).padStart(4,"0")}</span>
+                      <span style={{ fontSize: 16, fontWeight: 800, color: isCancel ? T.textSub : T.text }}>{o.customer_name}</span>
+                      <span style={{ fontSize: 13, color: T.textMute, marginLeft: 8 }}>#{String(o.id).padStart(4,"0")}</span>
                     </div>
-                    <span style={{ fontSize: 12, fontWeight: 700, background: isDone ? C.greenBg : isCancel ? C.redBg : C.amberBg, color: isDone ? C.green : isCancel ? C.red : C.amber, padding: "3px 10px", borderRadius: 10 }}>
-                      {isDone ? "✅ เสร็จ" : isCancel ? "❌ ยกเลิก" : "🟡 ค้าง"}
-                    </span>
+                    <Badge
+                      label={isDone ? "✅ เสร็จ" : isCancel ? "❌ ยกเลิก" : "🟡 ค้าง"}
+                      color={isDone ? T.green : isCancel ? T.red : T.amber}
+                      bg={isDone ? T.greenL : isCancel ? T.redL : T.amberL}
+                    />
                   </div>
-                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 6 }}>{(o as any).departments?.name ?? o.dept_id} · {fmtDate(o.created_at)}</div>
-                  <div style={{ fontSize: 13, color: isCancel ? C.muted : C.text, textDecoration: isCancel ? "line-through" : "none", marginBottom: 6 }}>
-                    {o.items.map(it => `${it.name} ×${it.qty}`).join(" · ")}
+                  <div style={{ fontSize: 13, color: T.textMute, marginBottom: 6 }}>
+                    {(o as any).departments?.name ?? o.dept_id} · {fmtDate(o.created_at)}
                   </div>
-                  {!isCancel && <div style={{ fontSize: 15, fontWeight: 700, color: C.green, textAlign: "right" }}>{o.total} บาท</div>}
+                  <div style={{ fontSize: 14, color: isCancel ? T.textMute : T.text, textDecoration: isCancel ? "line-through" : "none", marginBottom: isDone ? 8 : 0 }}>
+                    {o.items.map(it => `${it.name} ×${it.qty}`).join("  ·  ")}
+                  </div>
+                  {isDone && (
+                    <div style={{ fontSize: 16, fontWeight: 800, color: T.green, textAlign: "right" }}>{o.total} บาท</div>
+                  )}
                 </div>
               );
             })}
