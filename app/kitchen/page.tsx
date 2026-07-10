@@ -1,128 +1,133 @@
 "use client";
 // ─── app/kitchen/page.tsx ─────────────────────────────────
-// Pro UI Redesign — Light & Clean, ตัวอักษรใหญ่ขึ้น, spacing ดีขึ้น
-// Logic เดิมทุกอย่างยังอยู่ครบ
+// รวม: ออเดอร์ (Clipboard tickets) + จัดการเมนู + ประวัติ — PIN เดียว
+// Redesign: "prep clipboard" paper theme — เอกสารกระดาษ/ใบสั่งครัว
 
 import { useEffect, useRef, useState } from "react";
 import {
   getTodayOrders, getOrderHistory,
-  updateOrderStatus, deleteOrder,
+  updateOrderStatus,
   subscribeToOrders, supabase,
   getMenuItems, toggleMenuItem, updateMenuItem,
   createMenuItem, deleteMenuItem,
   createAnnouncement, subscribeToMenuItems,
   getTodayCustomOrders, updateCustomOrderStatus, cancelCustomOrder,
   subscribeToCustomOrders,
+  uploadMenuImage, deleteMenuImage,
 } from "@/lib/supabase";
 import type { CustomOrder } from "@/lib/supabase";
-import type { Order, OrderStatus } from "@/types";
+import type { Order } from "@/types";
 import type { MenuItem } from "@/types";
 
+// ── PIN ───────────────────────────────────────────────────
 const KITCHEN_PIN = process.env.NEXT_PUBLIC_KITCHEN_PIN ?? "1234";
 
-const fmt = (s: string, ref?: string | null) => {
+// ── Helpers ───────────────────────────────────────────────
+const fmtElapsed = (s: string, ref?: string | null) => {
   const base = ref ? new Date(ref) : new Date(s);
-  const sec = Math.floor((Date.now() - base.getTime()) / 1000);
-  if (sec < 60) return `${sec}วิ`;
-  return `${Math.floor(sec / 60)}น.${String(sec % 60).padStart(2, "0")}วิ`;
+  const min = Math.floor((Date.now() - base.getTime()) / 60000);
+  return `${min} นาทีที่แล้ว`;
 };
+const fmtTime = (s: string) => new Date(s).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
 const fmtDate = (s: string) =>
   new Date(s).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-const isWarn = (o: Order) => {
-  const base = o.started_at ?? o.created_at;
-  const sec = Math.floor((Date.now() - new Date(base).getTime()) / 1000);
-  return (o.status === "new" && sec > 120) || (o.status === "cooking" && sec > 600);
+const orderCode = (id: number) => `#${String(7000 + id).slice(-4)}`;
+
+// ── สี & ฟอนต์ (Paper / Clipboard theme) ────────────────────
+const C = {
+  bg:     "#F7F2E7",
+  paper:  "#FFFFFF",
+  paper2: "#FBF7EE",
+  line:   "#E1D6BE",
+  ink:    "#2B2A26",
+  inkSoft:"#807A6B",
+
+  sage:   "#5F7F63",
+  sageBg: "#E5EBDF",
+  ochre:  "#B5842E",
+  ochreBg:"#F4E7CC",
+  plum:   "#8C3A4B",
+  plumBg: "#F3DEE1",
+
+  photoBg: "#EFE7D4",
 };
-
-// ── Design tokens ─────────────────────────────────────────
-const T = {
-  // Neutrals
-  white:    "#FFFFFF",
-  bg:       "#F8F7F5",
-  surface:  "#FFFFFF",
-  border:   "#E8E4DC",
-  borderMd: "#D4CEBF",
-  text:     "#1A1714",
-  textSub:  "#6B6560",
-  textMute: "#9A9490",
-
-  // Brand green
-  green:    "#2A5208",
-  greenMd:  "#3D7A0C",
-  greenL:   "#EBF4DC",
-  greenXL:  "#F4FAF0",
-  greenB:   "#A8D470",
-
-  // Amber
-  amber:    "#96560A",
-  amberL:   "#FDF0DC",
-  amberB:   "#F2C96A",
-
-  // Red
-  red:      "#991B1B",
-  redL:     "#FEF2F2",
-  redB:     "#FBBFBF",
-
-  // Blue (for info)
-  blue:     "#1D4ED8",
-  blueL:    "#EFF6FF",
-};
-const F = "Sarabun, sans-serif";
+const FD = "'Taviraj', serif";
+const FB = "'Noto Sans Thai', sans-serif";
+const FM = "'Courier Prime', monospace";
 const DEFAULT_CATS = ["ข้าว", "ก๋วยเตี๋ยว", "เครื่องดื่ม"];
 
-const COLS = [
-  { status: "new" as OrderStatus,     label: "ออเดอร์ใหม่",  icon: "🔔", accent: T.red,   accentL: T.redL,   accentB: T.redB,   bLabel: "รับออเดอร์",  next: "cooking" as const },
-  { status: "cooking" as OrderStatus, label: "กำลังปรุง",    icon: "🍳", accent: T.amber, accentL: T.amberL, accentB: T.amberB, bLabel: "เสร็จแล้ว",  next: "done" as const },
-  { status: "done" as OrderStatus,    label: "เสิร์ฟแล้ว",   icon: "✅", accent: T.green, accentL: T.greenL, accentB: T.greenB, bLabel: "ล้างรายการ", next: null },
-];
-
-// ── Reusable mini components ──────────────────────────────
-const Badge = ({ label, color, bg }: { label: string; color: string; bg: string }) => (
-  <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 20, fontSize: 12, fontWeight: 700, color, background: bg, fontFamily: F, whiteSpace: "nowrap" }}>
-    {label}
-  </span>
+// ── Icons (เล็ก ๆ ใช้ซ้ำ) ───────────────────────────────────
+const IconCheck = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} style={{ width: 12, height: 12 }}><path d="M4 12l5 5L20 6" /></svg>
+);
+const IconX = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} style={{ width: 12, height: 12 }}><path d="M6 6l12 12M18 6L6 18" /></svg>
+);
+const IconPhoto = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 26, height: 26 }}><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="11" r="2" /><path d="M21 16l-5-5-4 4-2-2-6 6" /></svg>
+);
+const IconLock = () => (
+  <svg fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" style={{ width: 16, height: 16 }}><rect x="4" y="10" width="16" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
 );
 
-const Btn = ({ children, onClick, disabled, variant = "primary", size = "md", style: extra }: any) => {
-  const base: React.CSSProperties = {
-    display: "inline-flex", alignItems: "center", justifyContent: "center",
-    gap: 6, border: "none", borderRadius: 10, fontFamily: F, fontWeight: 700,
-    cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.6 : 1,
-    transition: "opacity .15s",
-    fontSize: size === "sm" ? 13 : size === "lg" ? 16 : 14,
-    padding: size === "sm" ? "7px 14px" : size === "lg" ? "14px 20px" : "10px 16px",
-  };
-  const vars: Record<string, React.CSSProperties> = {
-    primary:   { background: T.green,  color: "#fff" },
-    secondary: { background: T.bg,     color: T.textSub, border: `1px solid ${T.border}` },
-    danger:    { background: T.redL,   color: T.red,     border: `1px solid ${T.redB}` },
-    dangerFill:{ background: T.red,    color: "#fff" },
-    amber:     { background: T.amber,  color: "#fff" },
-    amberOutline: { background: T.amberL, color: T.amber, border: `1px solid ${T.amberB}` },
-    ghost:     { background: "transparent", color: T.textSub, border: `1px solid ${T.border}` },
-  };
+// ── "ตั๋ว" การ์ดออเดอร์ — เทป+ขอบฉีก ─────────────────────────
+function TicketShell({ children }: { children: React.ReactNode }) {
   return (
-    <button onClick={onClick} disabled={disabled} style={{ ...base, ...(vars[variant] || vars.primary), ...extra }}>
+    <div style={{ background: C.paper2, border: `1px solid ${C.line}`, borderRadius: 2, position: "relative", paddingTop: 14, marginBottom: 8 }}>
+      <div style={{ position: "absolute", top: -9, left: "50%", transform: "translateX(-50%)", width: 46, height: 16, background: "#B7BDBE", borderRadius: 3, boxShadow: "0 2px 3px rgba(0,0,0,0.2)" }} />
       {children}
-    </button>
+      <div style={{ position: "absolute", bottom: -6, left: 0, right: 0, height: 12, backgroundImage: `linear-gradient(135deg, transparent 50%, ${C.bg} 50%)`, backgroundSize: "10px 12px", backgroundRepeat: "repeat-x" }} />
+    </div>
   );
-};
+}
+
+const stateTagStyle = (kind: "pending" | "cooking" | "attn") => ({
+  fontSize: 11, fontWeight: 700, padding: "3px 11px", borderRadius: 3, fontFamily: FD,
+  background: kind === "pending" ? C.ochreBg : kind === "attn" ? C.plumBg : C.sageBg,
+  color:      kind === "pending" ? C.ochre   : kind === "attn" ? C.plum   : C.sage,
+});
 
 // ─────────────────────────────────────────────────────────
 export default function KitchenPage() {
+  // ── Auth ──────────────────────────────────────────────
   const [pin,       setPin]       = useState("");
-  const [unlocked,  setUnlocked]  = useState(false);
-  const [checkingSession, setCheckingSession] = useState(true);
+  const [unlocked,  setUnlocked]  = useState(() =>
+    typeof window !== "undefined" && sessionStorage.getItem("kitchen_unlocked") === "1"
+  );
   const [pinError,  setPinError]  = useState(false);
-  const [tab, setTab] = useState<"kanban" | "menu" | "history">("kanban");
+
+  // ── Clock ─────────────────────────────────────────────
+  const [now, setNow] = useState(new Date());
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 15000); return () => clearInterval(t); }, []);
+
+  // ── Tab ───────────────────────────────────────────────
+  const [tab, setTab] = useState<"order" | "menu" | "history">("order");
+
+  // ── Orders state ──────────────────────────────────────
   const [orders,  setOrders]  = useState<Order[]>([]);
   const [history, setHistory] = useState<Order[]>([]);
   const [hdays,   setHdays]   = useState(1);
-  const [loadingOrders, setLoadingOrders] = useState(true);
   const [toast,   setToast]   = useState(false);
-  const [clearedIds, setClearedIds] = useState<Set<number>>(new Set());
+  const [clearedIds, setClearedIds] = useState<Set<number>>(() => {
+    try {
+      const saved = localStorage.getItem("kitchen_cleared_ids");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
+  // สถานะติ๊กถูก/กากบาทรายชิ้น — เก็บชั่วคราวในหน่วยความจำ (รีเฟรชแล้วรีเซ็ต)
+  const [itemMarks, setItemMarks] = useState<Record<string, "ok" | "no">>({});
   const audioRef = useRef<AudioContext | null>(null);
+
+  // ── Custom Orders state ──────────────────────────────
   const [customOrders, setCustomOrders] = useState<CustomOrder[]>([]);
+
+  // ── ประกาศถึงลูกค้า ───────────────────────────────────
+  const [announceText, setAnnounceText] = useState("เมนูวันนี้อัปเดตแล้ว — กะเพราหมูกรอบพร้อมเสิร์ฟ");
+  const [announceEditing, setAnnounceEditing] = useState(false);
+  const [announceDraft, setAnnounceDraft] = useState(announceText);
+  const [annSending, setAnnSending] = useState(false);
+
+  // ── Menu state ────────────────────────────────────────
   const [items,      setItems]      = useState<MenuItem[]>([]);
   const [loadingMenu, setLoadingMenu] = useState(true);
   const [menuCat,    setMenuCat]    = useState("ทั้งหมด");
@@ -130,11 +135,10 @@ export default function KitchenPage() {
   const [editName,   setEditName]   = useState("");
   const [editPrice,  setEditPrice]  = useState("");
   const [editIng,    setEditIng]    = useState("");
+  const [editImageFile,    setEditImageFile]    = useState<File | null>(null);
+  const [editImagePreview, setEditImagePreview] = useState<string | null>(null);
   const [saving,     setSaving]     = useState<number | null>(null);
   const [menuToast,  setMenuToast]  = useState("");
-  const [annText,    setAnnText]    = useState("");
-  const [annSending, setAnnSending] = useState(false);
-  const [showAnn,    setShowAnn]    = useState(false);
   const [showAdd,    setShowAdd]    = useState(false);
   const [newName,    setNewName]    = useState("");
   const [newPrice,   setNewPrice]   = useState("");
@@ -143,19 +147,13 @@ export default function KitchenPage() {
   const [newCatText,   setNewCatText]   = useState("");
   const [newEmoji,   setNewEmoji]   = useState("🍽️");
   const [newIng,     setNewIng]     = useState("");
+  const [newImageFile,    setNewImageFile]    = useState<File | null>(null);
+  const [newImagePreview, setNewImagePreview] = useState<string | null>(null);
+  const [imgUploading, setImgUploading] = useState(false);
   const [adding,     setAdding]     = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
-  // ── Session check (fix hydration) ─────────────────────
-  useEffect(() => {
-    if (sessionStorage.getItem("kitchen_unlocked") === "1") setUnlocked(true);
-    try {
-      const saved = localStorage.getItem("kitchen_cleared_ids");
-      if (saved) setClearedIds(new Set(JSON.parse(saved)));
-    } catch { }
-    setCheckingSession(false);
-  }, []);
-
+  // ── PIN handler ───────────────────────────────────────
   const handlePin = (p: string) => {
     setPin(p);
     if (p.length === 4) {
@@ -168,8 +166,12 @@ export default function KitchenPage() {
       }
     }
   };
-  const handleLock = () => { setUnlocked(false); sessionStorage.removeItem("kitchen_unlocked"); };
+  const handleLock = () => {
+    if (!window.confirm("ล็อกหน้าจอและกลับไปหน้าใส่ PIN?")) return;
+    setUnlocked(false); sessionStorage.removeItem("kitchen_unlocked");
+  };
 
+  // ── เสียง ─────────────────────────────────────────────
   const playTone = (freq: number, dur: number, vol = 0.4) => {
     try {
       if (!audioRef.current) audioRef.current = new AudioContext();
@@ -186,11 +188,18 @@ export default function KitchenPage() {
   const playBeep  = () => { playTone(880,0.15,0.5); setTimeout(()=>playTone(880,0.15,0.5),200); setTimeout(()=>playTone(1100,0.3,0.6),400); };
   const playAlert = () => { playTone(520,0.2,0.5); setTimeout(()=>playTone(380,0.4,0.5),250); };
 
+  // ── Load orders ───────────────────────────────────────
   useEffect(() => {
     if (!unlocked) return;
     getTodayOrders().then(d => {
-      setOrders((d as Order[]).filter(o => !clearedIds.has(o.id)));
-    }).finally(() => setLoadingOrders(false));
+      const cleared = (() => {
+        try {
+          const saved = localStorage.getItem("kitchen_cleared_ids");
+          return saved ? new Set<number>(JSON.parse(saved)) : new Set<number>();
+        } catch { return new Set<number>(); }
+      })();
+      setOrders((d as Order[]).filter(o => !cleared.has(o.id)));
+    });
   }, [unlocked]);
 
   useEffect(() => {
@@ -198,13 +207,14 @@ export default function KitchenPage() {
     getOrderHistory(hdays).then(d => setHistory(d as Order[]));
   }, [unlocked, tab, hdays]);
 
+  // ── Realtime orders ───────────────────────────────────
   useEffect(() => {
     if (!unlocked) return;
     const ch = subscribeToOrders((payload) => {
       if (payload.eventType === "INSERT") {
         supabase.from("orders").select("*, departments(id,name)").eq("id", payload.new.id).single()
           .then(({ data }) => {
-            if (data) { setOrders(p => [data as Order, ...p]); setToast(true); setTimeout(() => setToast(false), 3500); playBeep(); }
+            if (data) { setOrders(p => [data as Order, ...p]); setToast(true); setTimeout(() => setToast(false), 3000); playBeep(); }
           });
       }
       if (payload.eventType === "UPDATE")
@@ -215,15 +225,17 @@ export default function KitchenPage() {
     return () => { supabase.removeChannel(ch); };
   }, [unlocked]);
 
-  useEffect(() => {
-    const t = setInterval(() => setOrders(p => [...p]), 1000);
-    return () => clearInterval(t);
-  }, []);
-
+  // ── Load custom orders ───────────────────────────────
   useEffect(() => {
     if (!unlocked) return;
     getTodayCustomOrders().then(d => {
-      setCustomOrders(d.filter(o => !clearedIds.has(-o.id)));
+      const cleared = (() => {
+        try {
+          const saved = localStorage.getItem("kitchen_cleared_ids");
+          return saved ? new Set<number>(JSON.parse(saved)) : new Set<number>();
+        } catch { return new Set<number>(); }
+      })();
+      setCustomOrders(d.filter(o => !cleared.has(-o.id)));
     });
   }, [unlocked]);
 
@@ -232,7 +244,7 @@ export default function KitchenPage() {
     const ch = subscribeToCustomOrders((payload) => {
       if (payload.eventType === "INSERT") {
         setCustomOrders(p => [payload.new as CustomOrder, ...p]);
-        setToast(true); setTimeout(() => setToast(false), 3500); playBeep();
+        setToast(true); setTimeout(() => setToast(false), 3000); playBeep();
       }
       if (payload.eventType === "UPDATE")
         setCustomOrders(p => p.map(o => o.id === payload.new.id ? { ...o, ...payload.new } : o));
@@ -242,6 +254,7 @@ export default function KitchenPage() {
     return () => { supabase.removeChannel(ch); };
   }, [unlocked]);
 
+  // ── Load menu ─────────────────────────────────────────
   useEffect(() => {
     if (!unlocked) return;
     getMenuItems().then(d => setItems(d as MenuItem[])).finally(() => setLoadingMenu(false));
@@ -256,18 +269,16 @@ export default function KitchenPage() {
     return () => { supabase.removeChannel(ch); };
   }, [unlocked]);
 
-  const handleMove = async (id: number, status: "cooking" | "done") => {
+  // ── Order handlers (ปกติ) ─────────────────────────────
+  const acceptOrder = async (id: number) => {
     try {
-      await updateOrderStatus(id, status);
-      setOrders(p => p.map(o => o.id === id ? { ...o, status,
-        started_at:   status === "cooking" ? new Date().toISOString() : o.started_at,
-        completed_at: status === "done"    ? new Date().toISOString() : o.completed_at,
-      } : o));
+      await updateOrderStatus(id, "cooking");
+      setOrders(p => p.map(o => o.id === id ? { ...o, status: "cooking", started_at: new Date().toISOString() } : o));
     } catch { alert("เกิดข้อผิดพลาด"); }
   };
 
-  const handleCancel = async (id: number) => {
-    if (!window.confirm("ยืนยันยกเลิกออเดอร์นี้?")) return;
+  const rejectOrder = async (id: number) => {
+    if (!window.confirm("ยืนยันปฏิเสธออเดอร์นี้?\nออเดอร์จะถูกยกเลิกและแจ้งผู้สั่งทันที")) return;
     try {
       const { error } = await supabase.from("orders").update({ status: "cancelled" }).eq("id", id);
       if (error) throw error;
@@ -276,33 +287,37 @@ export default function KitchenPage() {
     } catch { alert("เกิดข้อผิดพลาด"); }
   };
 
-  const handleClearDone = (id: number) => {
-    setClearedIds(prev => {
-      const next = new Set(prev);
-      next.add(id);
-      localStorage.setItem("kitchen_cleared_ids", JSON.stringify([...next]));
-      return next;
-    });
-    setOrders(p => p.filter(o => o.id !== id));
-  };
-
-  const activeOrders = orders.filter(o => o.status !== ("cancelled" as any));
-  const total   = activeOrders.length;
-  const pending = activeOrders.filter(o => o.status !== "done").length;
-  const revenue = activeOrders.reduce((s, o) => s + o.total, 0);
-
-  const handleCustomMove = async (id: number, status: "cooking" | "done") => {
+  const completeOrder = async (id: number) => {
     try {
-      await updateCustomOrderStatus(id, status);
-      setCustomOrders(p => p.map(o => o.id === id ? { ...o, status,
-        started_at:   status === "cooking" ? new Date().toISOString() : o.started_at,
-        completed_at: status === "done"    ? new Date().toISOString() : o.completed_at,
-      } : o));
+      await updateOrderStatus(id, "done");
+      setClearedIds(prev => {
+        const next = new Set(prev); next.add(id);
+        localStorage.setItem("kitchen_cleared_ids", JSON.stringify([...next]));
+        return next;
+      });
+      setOrders(p => p.filter(o => o.id !== id));
     } catch { alert("เกิดข้อผิดพลาด"); }
   };
 
-  const handleCustomCancel = async (id: number) => {
-    if (!window.confirm("ยืนยันยกเลิกรายการตามสั่งนี้?")) return;
+  const setItemMark = (orderId: number, idx: number, mark: "ok" | "no") => {
+    const key = `${orderId}_${idx}`;
+    setItemMarks(prev => {
+      const next = { ...prev };
+      if (next[key] === mark) delete next[key]; else next[key] = mark;
+      return next;
+    });
+  };
+
+  // ── Custom Order handlers ────────────────────────────
+  const acceptCustom = async (id: number) => {
+    try {
+      await updateCustomOrderStatus(id, "cooking");
+      setCustomOrders(p => p.map(o => o.id === id ? { ...o, status: "cooking", started_at: new Date().toISOString() } : o));
+    } catch { alert("เกิดข้อผิดพลาด"); }
+  };
+
+  const rejectCustom = async (id: number) => {
+    if (!window.confirm("ยืนยันปฏิเสธรายการตามสั่งนี้?")) return;
     try {
       await cancelCustomOrder(id);
       setCustomOrders(p => p.filter(o => o.id !== id));
@@ -310,6 +325,19 @@ export default function KitchenPage() {
     } catch { alert("เกิดข้อผิดพลาด"); }
   };
 
+  const completeCustom = async (id: number) => {
+    try {
+      await updateCustomOrderStatus(id, "done");
+      setClearedIds(prev => {
+        const next = new Set(prev); next.add(-id);
+        localStorage.setItem("kitchen_cleared_ids", JSON.stringify([...next]));
+        return next;
+      });
+      setCustomOrders(p => p.filter(o => o.id !== id));
+    } catch { alert("เกิดข้อผิดพลาด"); }
+  };
+
+  // ── Menu handlers ─────────────────────────────────────
   const showMenuToast = (msg: string) => { setMenuToast(msg); setTimeout(() => setMenuToast(""), 2500); };
 
   const handleToggle = async (item: MenuItem) => {
@@ -323,8 +351,10 @@ export default function KitchenPage() {
   };
 
   const openEdit = (item: MenuItem) => {
-    setEditing(item.id); setEditName(item.name);
+    setEditing(editing === item.id ? null : item.id);
+    setEditName(item.name);
     setEditPrice(String(item.price)); setEditIng((item as any).ingredients ?? "");
+    setEditImageFile(null); setEditImagePreview((item as any).image_url ?? null);
   };
 
   const handleSave = async (item: MenuItem) => {
@@ -333,10 +363,19 @@ export default function KitchenPage() {
     if (!p || p <= 0) { alert("ราคาไม่ถูกต้อง"); return; }
     setSaving(item.id);
     try {
-      await updateMenuItem(item.id, { name: editName.trim(), price: p, ingredients: editIng.trim() });
-      setItems(prev => prev.map(m => m.id === item.id ? { ...m, name: editName.trim(), price: p, ingredients: editIng.trim() } as any : m));
-      setEditing(null); showMenuToast(`อัปเดต "${editName.trim()}" แล้ว`);
-    } catch (e: any) { alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "")); }
+      let image_url = (item as any).image_url ?? null;
+      if (editImageFile) {
+        setImgUploading(true);
+        const uploaded = await uploadMenuImage(editImageFile, item.id);
+        if (image_url) deleteMenuImage(image_url);
+        image_url = uploaded;
+        setImgUploading(false);
+      }
+      await updateMenuItem(item.id, { name: editName.trim(), price: p, ingredients: editIng.trim(), image_url });
+      setItems(prev => prev.map(m => m.id === item.id ? { ...m, name: editName.trim(), price: p, ingredients: editIng.trim(), image_url } as any : m));
+      setEditing(null); setEditImageFile(null); setEditImagePreview(null);
+      showMenuToast(`อัปเดต "${editName.trim()}" แล้ว`);
+    } catch (e: any) { alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "")); setImgUploading(false); }
     finally { setSaving(null); }
   };
 
@@ -348,631 +387,402 @@ export default function KitchenPage() {
     if (!finalCat) { alert("กรุณาเลือกหรือพิมพ์หมวดหมู่"); return; }
     setAdding(true);
     try {
-      const created = await createMenuItem({ name: newName.trim(), price: p, category: finalCat, emoji: newEmoji, ingredients: newIng.trim() });
+      let image_url: string | null = null;
+      if (newImageFile) {
+        setImgUploading(true);
+        image_url = await uploadMenuImage(newImageFile);
+        setImgUploading(false);
+      }
+      const created = await createMenuItem({ name: newName.trim(), price: p, category: finalCat, emoji: newEmoji, ingredients: newIng.trim(), image_url });
       setItems(prev => [...prev, created as MenuItem]);
       setShowAdd(false);
       setNewName(""); setNewPrice(""); setNewIng(""); setNewEmoji("🍽️");
       setNewCatCustom(false); setNewCatText(""); setNewCat("ข้าว");
+      setNewImageFile(null); setNewImagePreview(null);
       showMenuToast(`เพิ่มเมนู "${created.name}" แล้ว`);
-    } catch (e: any) { alert("เพิ่มเมนูไม่สำเร็จ: " + (e?.message ?? "")); }
+    } catch (e: any) { alert("เพิ่มเมนูไม่สำเร็จ: " + (e?.message ?? "")); setImgUploading(false); }
     finally { setAdding(false); }
   };
 
   const handleDeleteMenu = async (item: MenuItem) => {
     try {
       await deleteMenuItem(item.id);
+      if ((item as any).image_url) deleteMenuImage((item as any).image_url);
       setItems(prev => prev.filter(m => m.id !== item.id));
-      setDeleteConfirm(null); showMenuToast(`ลบ "${item.name}" แล้ว`);
+      setDeleteConfirm(null); setEditing(null); showMenuToast(`ลบ "${item.name}" แล้ว`);
     } catch (e: any) { alert("ลบไม่สำเร็จ: " + (e?.message ?? "")); }
   };
 
-  const handleAnnounce = async () => {
-    if (!annText.trim()) return;
+  const handleSaveAnnounce = async () => {
+    if (!announceDraft.trim()) return;
     setAnnSending(true);
-    try { await createAnnouncement(annText.trim()); showMenuToast("ส่งประกาศแล้ว"); setAnnText(""); setShowAnn(false); }
-    catch { alert("เกิดข้อผิดพลาด"); }
-    finally { setAnnSending(false); }
-  };
-
-  const quickAnnounce = async () => {
-    setAnnSending(true);
-    try { await createAnnouncement("เมนูวันนี้อัปเดตแล้ว 🍽️"); showMenuToast("ส่งประกาศแล้ว"); }
-    catch { alert("เกิดข้อผิดพลาด"); }
+    try {
+      await createAnnouncement(announceDraft.trim());
+      setAnnounceText(announceDraft.trim());
+      setAnnounceEditing(false);
+      showMenuToast("ส่งประกาศแล้ว");
+    } catch { alert("เกิดข้อผิดพลาด"); }
     finally { setAnnSending(false); }
   };
 
   const allCats = Array.from(new Set([...DEFAULT_CATS, ...items.map(m => m.category)])).sort();
   const CATS = ["ทั้งหมด", ...allCats];
   const filtered = menuCat === "ทั้งหมด" ? items : items.filter(m => m.category === menuCat);
-  const availCount = items.filter(m => m.available).length;
 
-  // ── Checking session ──────────────────────────────────
-  if (checkingSession) return <div style={{ minHeight: "100dvh", background: T.bg }} />;
+  // ── รวมตั๋วออเดอร์ (ปกติ + ตามสั่ง) เรียงใหม่สุดก่อน ────────
+  type Ticket =
+    | { kind: "reg"; sortTime: number; o: Order }
+    | { kind: "custom"; sortTime: number; o: CustomOrder };
+  const tickets: Ticket[] = [
+    ...orders.filter(o => o.status === "new" || o.status === "cooking")
+      .map(o => ({ kind: "reg" as const, sortTime: new Date(o.created_at).getTime(), o })),
+    ...customOrders.filter(o => o.status === "new" || o.status === "cooking")
+      .map(o => ({ kind: "custom" as const, sortTime: new Date(o.created_at).getTime(), o })),
+  ].sort((a, b) => b.sortTime - a.sortTime);
+  const pendingCount = orders.filter(o => o.status === "new").length + customOrders.filter(o => o.status === "new").length;
+
+  const dateLabel = `${now.toLocaleDateString("th-TH", { weekday: "long" })}ที่ ${now.getDate()} ${now.toLocaleDateString("th-TH", { month: "short" })}`;
+  const clockLabel = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
   // ── PIN SCREEN ────────────────────────────────────────
   if (!unlocked) return (
-    <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: T.bg, fontFamily: F, padding: 24 }}>
-      <div style={{ width: 80, height: 80, borderRadius: 24, background: T.greenL, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, marginBottom: 20 }}>🍳</div>
-      <div style={{ fontSize: 26, fontWeight: 800, color: T.text, marginBottom: 6 }}>หน้าครัว</div>
-      <div style={{ fontSize: 15, color: T.textSub, marginBottom: 40 }}>ใส่ PIN 4 หลักเพื่อเข้าใช้งาน</div>
-      <div style={{ display: "flex", gap: 16, marginBottom: 40 }}>
-        {[0,1,2,3].map(i => (
-          <div key={i} style={{
-            width: 16, height: 16, borderRadius: "50%",
-            background: pin.length > i ? (pinError ? T.red : T.green) : T.border,
-            transition: "background .2s",
-            boxShadow: pin.length > i && !pinError ? `0 0 0 4px ${T.greenL}` : "none",
-          }} />
-        ))}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, width: "100%", maxWidth: 300 }}>
-        {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((n, i) => (
-          <button key={i}
-            onClick={() => {
-              if (n === "⌫") setPin(p => p.slice(0,-1));
-              else if (n !== "") handlePin(pin + String(n));
-            }}
-            style={{
-              padding: "20px 0", border: `1.5px solid ${T.border}`,
-              borderRadius: 16, background: n === "" ? "transparent" : T.surface,
-              fontSize: 24, fontWeight: 700, cursor: n === "" ? "default" : "pointer",
-              color: T.text, fontFamily: F,
-              boxShadow: n !== "" ? "0 1px 3px rgba(0,0,0,.06)" : "none",
-            }}>
-            {n}
-          </button>
-        ))}
-      </div>
-      {pinError && (
-        <div style={{ color: T.red, fontSize: 14, marginTop: 20, fontWeight: 600, background: T.redL, padding: "8px 20px", borderRadius: 10 }}>
-          PIN ไม่ถูกต้อง กรุณาลองใหม่
+    <>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Taviraj:wght@500;600;700&family=Noto+Sans+Thai:wght@400;500;600&family=Courier+Prime:wght@400;700&display=swap');`}</style>
+      <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: C.bg, fontFamily: FB, padding: 24 }}>
+        <div style={{ width: 84, height: 84, borderRadius: "50%", border: `2px solid ${C.ink}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, fontWeight: 700, fontFamily: FD, marginBottom: 20, background: C.paper }}>PP</div>
+        <div style={{ fontSize: 24, fontWeight: 700, color: C.ink, marginBottom: 6, fontFamily: FD }}>ครัว PETPAL</div>
+        <div style={{ fontSize: 14, color: C.inkSoft, marginBottom: 36, fontFamily: FM }}>ใส่ PIN เพื่อเข้าใช้งาน</div>
+        <div style={{ display: "flex", gap: 18, marginBottom: 36 }}>
+          {[0,1,2,3].map(i => (
+            <div key={i} style={{ width: 18, height: 18, borderRadius: "50%", background: pin.length > i ? (pinError ? C.plum : C.sage) : "transparent", border: `2px solid ${pin.length > i ? "transparent" : C.line}`, transition: "background .15s" }} />
+          ))}
         </div>
-      )}
-    </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, maxWidth: 300, width: "100%" }}>
+          {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((n, i) => (
+            <button key={i}
+              onClick={() => {
+                if (n === "⌫") setPin(p => p.slice(0,-1));
+                else if (n !== "") handlePin(pin + String(n));
+              }}
+              style={{ padding: "20px 0", border: `1.5px solid ${C.line}`, borderRadius: 8, background: n === "" ? "transparent" : C.paper, fontSize: 22, fontWeight: 600, cursor: n === "" ? "default" : "pointer", color: C.ink, fontFamily: FD }}>
+              {n}
+            </button>
+          ))}
+        </div>
+        {pinError && <div style={{ color: C.plum, fontSize: 14, marginTop: 18, fontWeight: 700, fontFamily: FD }}>PIN ไม่ถูกต้อง</div>}
+      </div>
+    </>
   );
 
   // ── MAIN ──────────────────────────────────────────────
   return (
-    <div style={{ minHeight: "100dvh", background: T.bg, fontFamily: F }}>
+    <>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Taviraj:wght@500;600;700&family=Noto+Sans+Thai:wght@400;500;600&family=Courier+Prime:wght@400;700&display=swap');`}</style>
+      <div style={{ minHeight: "100dvh", background: C.bg, fontFamily: FB, paddingBottom: 60 }}>
 
-      {/* Toast */}
-      {(toast || menuToast) && (
-        <div style={{
-          position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)",
-          background: menuToast ? T.amber : T.green,
-          color: "#fff", padding: "12px 28px",
-          borderRadius: "0 0 16px 16px", fontSize: 15, fontWeight: 700,
-          zIndex: 200, whiteSpace: "nowrap",
-          boxShadow: "0 4px 20px rgba(0,0,0,.15)",
-        }}>
-          {menuToast ? `✓ ${menuToast}` : "🔔 มีออร์เดอร์ใหม่!"}
-        </div>
-      )}
+        {/* Toast ออเดอร์ใหม่ */}
+        {toast && (
+          <div style={{ position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)", background: C.sage, color: C.paper, padding: "12px 28px", borderRadius: "0 0 10px 10px", fontSize: 14, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap", fontFamily: FD }}>
+            📌 มีออเดอร์ใหม่!
+          </div>
+        )}
+        {menuToast && (
+          <div style={{ position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)", background: C.ochre, color: C.paper, padding: "12px 28px", borderRadius: "0 0 10px 10px", fontSize: 14, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap", fontFamily: FD }}>
+            ✓ {menuToast}
+          </div>
+        )}
 
-      {/* ── Topbar ─────────────────────────────────────── */}
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0 20px", height: 64,
-        background: T.surface, borderBottom: `1px solid ${T.border}`,
-        position: "sticky", top: 0, zIndex: 100,
-        boxShadow: "0 1px 8px rgba(0,0,0,.05)",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 12, background: T.greenL, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🍳</div>
-          <div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: T.text, lineHeight: 1.2 }}>ครัว PETPAL</div>
-            <div style={{ fontSize: 12, color: T.textMute }} suppressHydrationWarning>
-              {new Date().toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long" })}
+        {/* Header */}
+        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 26px 14px", borderBottom: `2px solid ${C.ink}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
+            <div style={{ width: 44, height: 44, borderRadius: "50%", border: `2px solid ${C.ink}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: FD, fontWeight: 700, fontSize: 16 }}>PP</div>
+            <div>
+              <div style={{ fontFamily: FD, fontWeight: 700, fontSize: 23, color: C.ink }}>ครัว PETPAL</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, fontFamily: FM, marginTop: 2 }}>รายการเตรียมอาหาร · {dateLabel}</div>
             </div>
           </div>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Btn onClick={playBeep} variant="ghost" size="sm">🔔</Btn>
-          <Btn onClick={handleLock} variant="danger" size="sm">🔒 ล็อก</Btn>
-        </div>
-      </div>
-
-      {/* ── Stats row (kanban) ──────────────────────────── */}
-      {tab === "kanban" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, padding: "16px 20px 0" }}>
-          {[
-            { label: "ออเดอร์วันนี้", val: total,   color: T.text,  icon: "📋" },
-            { label: "รอทำ",          val: pending,  color: pending > 0 ? T.red : T.text, icon: "⏳" },
-            { label: "รายได้",         val: `${revenue.toLocaleString()}฿`, color: T.green, icon: "💰" },
-          ].map(s => (
-            <div key={s.label} style={{
-              background: T.surface, borderRadius: 16, padding: "14px 16px",
-              border: `1px solid ${T.border}`,
-              boxShadow: "0 1px 4px rgba(0,0,0,.04)",
-            }}>
-              <div style={{ fontSize: 11, color: T.textMute, fontWeight: 600, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".04em" }}>{s.label}</div>
-              <div style={{ fontSize: 28, fontWeight: 800, color: s.color, lineHeight: 1 }}>{s.val}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div style={{ fontFamily: FM, fontSize: 13, color: C.inkSoft, textAlign: "right" }}>
+              <b style={{ color: C.ink, display: "block", fontSize: 15 }}>{clockLabel}</b>
+              เวลาปัจจุบัน
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── Stats row (menu) ────────────────────────────── */}
-      {tab === "menu" && (
-        <div style={{ padding: "16px 20px 0", display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ flex: 1, background: T.surface, borderRadius: 16, padding: "14px 16px", border: `1px solid ${T.border}`, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-            <div style={{ fontSize: 11, color: T.textMute, fontWeight: 600, marginBottom: 4, textTransform: "uppercase", letterSpacing: ".04em" }}>เปิดขาย</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, lineHeight: 1 }}>{availCount}<span style={{ fontSize: 16, color: T.textMute, fontWeight: 600 }}>/{items.length}</span></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, color: C.sage, fontSize: 13, fontWeight: 600, fontFamily: FD }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: C.sage }} />เปิดรับออเดอร์
+            </div>
+            <button onClick={handleLock} style={{ width: 38, height: 38, borderRadius: "50%", border: `1.5px solid ${C.ink}`, background: "transparent", color: C.ink, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><IconLock /></button>
           </div>
-        </div>
-      )}
+        </header>
 
-      {/* ── Tab bar ─────────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 0, padding: "14px 20px 0", borderBottom: `1px solid ${T.border}`, background: T.surface, position: "sticky", top: 64, zIndex: 90 }}>
-        {[
-          ["kanban",  "📋", "ออเดอร์"],
-          ["menu",    "🍽️", "เมนู"],
-          ["history", "🕐", "ประวัติ"],
-        ].map(([t, icon, label]) => (
-          <button key={t} onClick={() => setTab(t as any)} style={{
-            flex: 1, padding: "10px 8px 12px", border: "none", background: "transparent",
-            fontSize: 14, fontWeight: tab === t ? 800 : 600,
-            color: tab === t ? T.green : T.textSub,
-            cursor: "pointer", fontFamily: F, display: "flex",
-            flexDirection: "column", alignItems: "center", gap: 2,
-            borderBottom: `3px solid ${tab === t ? T.green : "transparent"}`,
-            transition: "all .15s",
-          }}>
-            <span style={{ fontSize: 18 }}>{icon}</span>
-            <span>{label}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* ══════════════ TAB: KANBAN ══════════════ */}
-      {tab === "kanban" && (
-        <div style={{ padding: "20px 20px 32px", display: "flex", flexDirection: "column", gap: 24 }}>
-
-          {/* ── Custom orders ── */}
-          {customOrders.length > 0 && (
-            <section>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 18 }}>✏️</span>
-                  <span style={{ fontSize: 17, fontWeight: 800, color: T.amber }}>ตามสั่ง</span>
-                </div>
-                <Badge label={`${customOrders.length} รายการ`} color={T.amber} bg={T.amberL} />
-              </div>
-              {customOrders.map(o => {
-                const CUSTOM_COLS: Record<string, any> = {
-                  new:     { next: "cooking", bLabel: "รับออเดอร์",  accent: T.red,   accentL: T.redL },
-                  cooking: { next: "done",    bLabel: "เสร็จแล้ว",  accent: T.amber, accentL: T.amberL },
-                  done:    { next: null,       bLabel: "ล้างรายการ", accent: T.green, accentL: T.greenL },
-                };
-                const col = CUSTOM_COLS[o.status] ?? CUSTOM_COLS.new;
-                return (
-                  <div key={o.id} style={{
-                    background: T.surface, borderRadius: 18, marginBottom: 12,
-                    border: `1.5px solid ${T.amberB}`, overflow: "hidden",
-                    boxShadow: "0 2px 8px rgba(168,101,14,.08)",
-                  }}>
-                    <div style={{ padding: "12px 16px", background: T.amberL, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <Badge label={o.status === "new" ? "🔔 ใหม่" : o.status === "cooking" ? "🍳 ปรุง" : "✅ เสร็จ"} color={T.amber} bg={T.surface} />
-                      <span style={{ fontSize: 13, color: T.textSub, fontWeight: 600 }}>#{String(o.id).padStart(4,"0")} · {o.dept_id}</span>
-                    </div>
-                    <div style={{ padding: "16px" }}>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: T.text, marginBottom: 10 }}>👤 {o.customer_name}</div>
-                      <div style={{ padding: "12px 14px", background: T.amberL, borderRadius: 12, fontSize: 15, color: T.text, lineHeight: 1.8, marginBottom: o.note ? 10 : 16, whiteSpace: "pre-wrap" }}>
-                        {o.items}
-                      </div>
-                      {o.note && (
-                        <div style={{ fontSize: 14, color: T.amber, background: T.amberL, padding: "8px 12px", borderRadius: 10, marginBottom: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-                          📝 {o.note}
-                        </div>
-                      )}
-                      <div style={{ display: "flex", gap: 10 }}>
-                        {col.next ? (
-                          <>
-                            <button onClick={() => handleCustomMove(o.id, col.next!)} style={{
-                              flex: 1, padding: "13px 0", border: "none", borderRadius: 12,
-                              fontSize: 15, fontWeight: 800, cursor: "pointer",
-                              background: col.accent, color: "#fff", fontFamily: F,
-                            }}>{col.bLabel} →</button>
-                            <button onClick={() => handleCustomCancel(o.id)} style={{
-                              padding: "13px 16px", border: `1.5px solid ${T.redB}`,
-                              background: T.redL, borderRadius: 12, cursor: "pointer",
-                              fontSize: 14, color: T.red, fontWeight: 700, fontFamily: F,
-                            }}>✕ ยกเลิก</button>
-                          </>
-                        ) : (
-                          <button onClick={() => {
-                            setClearedIds(prev => {
-                              const next = new Set(prev);
-                              next.add(-o.id);
-                              localStorage.setItem("kitchen_cleared_ids", JSON.stringify([...next]));
-                              return next;
-                            });
-                            setCustomOrders(p => p.filter(x => x.id !== o.id));
-                          }} style={{
-                            flex: 1, padding: "13px 0", border: "none", borderRadius: 12,
-                            fontSize: 15, fontWeight: 800, cursor: "pointer",
-                            background: T.green, color: "#fff", fontFamily: F,
-                          }}>{col.bLabel}</button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </section>
+        {/* ประกาศถึงลูกค้า */}
+        <div style={{ padding: "18px 26px 0" }}>
+          {!announceEditing ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 12, background: C.sageBg, borderRadius: 4, padding: "12px 18px" }}>
+              <span style={{ fontSize: 14 }}>📌</span>
+              <span style={{ fontSize: 14, fontWeight: 500, flex: 1, fontStyle: "italic", color: C.ink }}>{announceText}</span>
+              <button onClick={() => { setAnnounceDraft(announceText); setAnnounceEditing(true); }} style={{ background: "none", border: "none", color: C.sage, fontSize: 12, cursor: "pointer", textDecoration: "underline", fontWeight: 600, fontFamily: FB }}>เขียนประกาศเอง</button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 8 }}>
+              <textarea value={announceDraft} onChange={e => setAnnounceDraft(e.target.value)}
+                style={{ flex: 1, border: `1.5px solid ${C.line}`, borderRadius: 4, padding: "10px 14px", fontFamily: FB, fontSize: 14, resize: "vertical", minHeight: 44, background: C.paper, color: C.ink }} />
+              <button onClick={handleSaveAnnounce} disabled={annSending} style={{ background: C.ink, color: C.paper, border: "none", borderRadius: 4, padding: "0 18px", fontWeight: 700, cursor: "pointer", fontFamily: FD }}>{annSending ? "..." : "บันทึก"}</button>
+            </div>
           )}
+        </div>
 
-          {/* ── Regular orders — per column ── */}
-          {COLS.map(col => {
-            const colOrders = orders.filter(o => o.status === col.status && o.status !== ("cancelled" as any));
-            return (
-              <section key={col.status}>
-                {/* Column header */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 36, height: 36, borderRadius: 10, background: col.accentL, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>{col.icon}</div>
-                    <span style={{ fontSize: 17, fontWeight: 800, color: col.accent }}>{col.label}</span>
-                  </div>
-                  <Badge label={`${colOrders.length} รายการ`} color={col.accent} bg={col.accentL} />
-                </div>
+        {/* Folder tabs */}
+        <nav style={{ display: "flex", gap: 4, padding: "24px 26px 0" }}>
+          {[
+            ["order",   "ออเดอร์", pendingCount],
+            ["menu",    "เมนู",   0],
+            ["history", "ประวัติ", 0],
+          ].map(([t, label, count]) => (
+            <button key={t as string} onClick={() => setTab(t as any)}
+              style={{
+                background: tab === t ? C.paper : C.paper2, border: `2px solid ${C.ink}`, borderBottom: tab === t ? `2px solid ${C.paper}` : `2px solid ${C.ink}`,
+                padding: tab === t ? "10px 24px 14px" : "10px 24px 12px", borderRadius: "8px 8px 0 0", cursor: "pointer",
+                fontFamily: FD, fontWeight: 600, fontSize: 15, color: tab === t ? C.ink : C.inkSoft,
+                position: "relative", top: tab === t ? 0 : 2, marginBottom: -2,
+              }}>
+              {label as string}
+              {(count as number) > 0 && <span style={{ background: C.plum, color: C.paper, fontFamily: FM, fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 999, marginLeft: 6 }}>{count as number}</span>}
+            </button>
+          ))}
+        </nav>
 
-                {colOrders.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "24px 0", color: T.textMute, fontSize: 14, border: `2px dashed ${T.border}`, borderRadius: 16 }}>
-                    — ไม่มีรายการ —
-                  </div>
-                ) : colOrders.map(o => {
-                  const warn = isWarn(o);
-                  return (
-                    <div key={o.id} style={{
-                      background: T.surface, borderRadius: 18, marginBottom: 12,
-                      border: warn && o.status === "new" ? `2px solid ${T.red}` : `1px solid ${T.border}`,
-                      overflow: "hidden",
-                      boxShadow: warn && o.status === "new"
-                        ? `0 0 0 4px ${T.redL}, 0 4px 16px rgba(153,27,27,.12)`
-                        : "0 1px 6px rgba(0,0,0,.05)",
-                    }}>
-                      {/* Card header */}
-                      <div style={{
-                        padding: "12px 16px", background: warn && o.status === "new" ? T.redL : col.accentL,
-                        borderBottom: `1px solid ${warn && o.status === "new" ? T.redB : col.accentB}`,
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                      }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{
-                            fontSize: 20, fontWeight: 800,
-                            color: warn ? T.red : col.accent,
-                          }} suppressHydrationWarning>{fmt(o.created_at, o.started_at)}</span>
-                          {warn && o.status === "new" && (
-                            <span style={{ fontSize: 11, fontWeight: 800, background: T.red, color: "#fff", padding: "2px 8px", borderRadius: 6 }}>⚡ รีบด่วน</span>
-                          )}
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <Badge label={(o as any).departments?.name ?? o.dept_id} color={T.green} bg={T.greenL} />
-                          <span style={{ fontSize: 12, color: T.textMute, fontWeight: 600 }}>#{String(o.id).padStart(4,"0")}</span>
-                        </div>
-                      </div>
+        {/* Panel */}
+        <section style={{ background: C.paper, border: `2px solid ${C.ink}`, borderRadius: "0 8px 8px 8px", margin: "0 26px", padding: 24, minHeight: 200 }}>
 
-                      {/* Card body */}
-                      <div style={{ padding: "14px 16px" }}>
-                        <div style={{ fontSize: 20, fontWeight: 800, color: T.text, marginBottom: 12 }}>👤 {o.customer_name}</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: o.note ? 10 : 14 }}>
-                          {o.items.map((it, i) => (
-                            <div key={i} style={{
-                              display: "flex", justifyContent: "space-between", alignItems: "center",
-                              padding: "8px 12px", background: T.bg, borderRadius: 10,
-                            }}>
-                              <span style={{ fontSize: 15, fontWeight: 600, color: T.text }}>🍽 {it.name}</span>
-                              <span style={{
-                                fontSize: 15, fontWeight: 800,
-                                background: col.accentL, color: col.accent,
-                                padding: "2px 12px", borderRadius: 8,
-                              }}>×{it.qty}</span>
-                            </div>
-                          ))}
-                        </div>
-                        {o.note && (
-                          <div style={{ fontSize: 14, color: T.amber, background: T.amberL, padding: "8px 12px", borderRadius: 10, marginBottom: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-                            📝 {o.note}
+          {/* ══════ ออเดอร์ ══════ */}
+          {tab === "order" && (
+            tickets.length === 0 ? (
+              <div style={{ color: C.inkSoft, padding: 14, fontStyle: "italic" }}>ยังไม่มีออเดอร์เข้ามาตอนนี้</div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px,1fr))", gap: 22 }}>
+                {tickets.map(t => {
+                  if (t.kind === "custom") {
+                    const o = t.o;
+                    return (
+                      <TicketShell key={`c${o.id}`}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 18px 10px", borderBottom: `1px dashed ${C.line}` }}>
+                          <div>
+                            <div style={{ fontFamily: FM, fontWeight: 700, fontSize: 15, color: C.ink }}>{orderCode(o.id)} <span style={{ fontSize: 10, color: C.ochre, fontFamily: FD }}>✏️ ตามสั่ง</span></div>
+                            <div style={{ fontFamily: FM, fontSize: 11, color: C.inkSoft }}>{fmtTime(o.created_at)} · {fmtElapsed(o.created_at, o.started_at)}</div>
                           </div>
-                        )}
-                        <div style={{ display: "flex", gap: 10 }}>
-                          {col.next ? (
+                          <span style={stateTagStyle(o.status === "new" ? "pending" : "cooking")}>{o.status === "new" ? "รอตอบรับ" : "กำลังเตรียม"}</span>
+                        </div>
+                        <div style={{ padding: "10px 18px 4px" }}>
+                          <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 4 }}>👤 {o.customer_name}</div>
+                          <div style={{ fontSize: 14, color: C.ink, padding: "6px 0", whiteSpace: "pre-wrap" }}>{o.items}</div>
+                          {o.note && <div style={{ fontSize: 12.5, color: C.ochre, fontStyle: "italic", marginBottom: 6 }}>📝 {o.note}</div>}
+                        </div>
+                        <div style={{ display: "flex", gap: 8, padding: "14px 18px 18px" }}>
+                          {o.status === "new" ? (
                             <>
-                              <button onClick={() => handleMove(o.id, col.next!)} style={{
-                                flex: 1, padding: "13px 0", border: "none", borderRadius: 12,
-                                fontSize: 15, fontWeight: 800, cursor: "pointer",
-                                background: col.accent, color: "#fff", fontFamily: F,
-                              }}>{col.bLabel} →</button>
-                              <button onClick={() => handleCancel(o.id)} style={{
-                                padding: "13px 16px", border: `1.5px solid ${T.redB}`,
-                                background: T.redL, borderRadius: 12, cursor: "pointer",
-                                fontSize: 14, color: T.red, fontWeight: 700, fontFamily: F,
-                              }}>✕</button>
+                              <button onClick={() => acceptCustom(o.id)} style={{ flex: 1, border: `1.5px solid ${C.sage}`, borderRadius: 3, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD, background: C.sage, color: C.paper }}>รับออเดอร์</button>
+                              <button onClick={() => rejectCustom(o.id)} style={{ flex: 1, border: `1.5px solid ${C.plum}`, borderRadius: 3, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD, background: "transparent", color: C.plum }}>ปฏิเสธ</button>
                             </>
                           ) : (
-                            <button onClick={() => handleClearDone(o.id)} style={{
-                              flex: 1, padding: "13px 0", border: "none", borderRadius: 12,
-                              fontSize: 15, fontWeight: 800, cursor: "pointer",
-                              background: T.green, color: "#fff", fontFamily: F,
-                            }}>{col.bLabel}</button>
+                            <button onClick={() => completeCustom(o.id)} style={{ flex: 1, border: "none", borderRadius: 3, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD, background: C.ink, color: C.paper }}>ส่งอาหารแล้ว</button>
                           )}
                         </div>
+                      </TicketShell>
+                    );
+                  }
+                  const o = t.o;
+                  const hasAttn = o.status === "cooking" && o.items.some((_, i) => itemMarks[`${o.id}_${i}`] === "no");
+                  const tagKind = o.status === "new" ? "pending" : hasAttn ? "attn" : "cooking";
+                  const tagLabel = o.status === "new" ? "รอตอบรับ" : hasAttn ? "แจ้งลูกค้า" : "กำลังเตรียม";
+                  return (
+                    <TicketShell key={`o${o.id}`}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 18px 10px", borderBottom: `1px dashed ${C.line}` }}>
+                        <div>
+                          <div style={{ fontFamily: FM, fontWeight: 700, fontSize: 15, color: C.ink }}>{orderCode(o.id)}</div>
+                          <div style={{ fontFamily: FM, fontSize: 11, color: C.inkSoft }}>{fmtTime(o.created_at)} · {fmtElapsed(o.created_at, o.started_at)}</div>
+                        </div>
+                        <span style={stateTagStyle(tagKind)}>{tagLabel}</span>
                       </div>
-                    </div>
+                      <div style={{ padding: "10px 18px 4px" }}>
+                        <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 2 }}>👤 {o.customer_name}</div>
+                        {o.items.map((it, i) => {
+                          const key = `${o.id}_${i}`;
+                          const mark = itemMarks[key];
+                          return (
+                            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", fontSize: 14.5, borderBottom: i < o.items.length - 1 ? `1px dotted ${C.line}` : "none", color: C.ink }}>
+                              <span style={{ fontFamily: FM, color: C.inkSoft, fontSize: 12, minWidth: 20 }}>x{it.qty}</span>
+                              <span style={{ flex: 1 }}>{it.name}</span>
+                              {o.status === "cooking" && (
+                                <div style={{ display: "flex", gap: 6 }}>
+                                  <button onClick={() => setItemMark(o.id, i, "ok")} style={{ width: 25, height: 25, border: `1.5px solid ${mark === "ok" ? C.sage : C.ink}`, background: mark === "ok" ? C.sage : C.paper, color: mark === "ok" ? C.paper : C.ink, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3 }}><IconCheck /></button>
+                                  <button onClick={() => setItemMark(o.id, i, "no")} style={{ width: 25, height: 25, border: `1.5px solid ${mark === "no" ? C.plum : C.ink}`, background: mark === "no" ? C.plum : C.paper, color: mark === "no" ? C.paper : C.ink, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3 }}><IconX /></button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {o.note && <div style={{ fontSize: 12.5, color: C.ochre, fontStyle: "italic", margin: "6px 0" }}>📝 {o.note}</div>}
+                      </div>
+                      <div style={{ display: "flex", gap: 8, padding: "14px 18px 18px" }}>
+                        {o.status === "new" ? (
+                          <>
+                            <button onClick={() => acceptOrder(o.id)} style={{ flex: 1, border: `1.5px solid ${C.sage}`, borderRadius: 3, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD, background: C.sage, color: C.paper }}>รับออเดอร์</button>
+                            <button onClick={() => rejectOrder(o.id)} style={{ flex: 1, border: `1.5px solid ${C.plum}`, borderRadius: 3, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD, background: "transparent", color: C.plum }}>ปฏิเสธ</button>
+                          </>
+                        ) : (
+                          <button onClick={() => completeOrder(o.id)} style={{ flex: 1, border: "none", borderRadius: 3, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD, background: C.ink, color: C.paper }}>ส่งอาหารแล้ว</button>
+                        )}
+                      </div>
+                    </TicketShell>
                   );
                 })}
-              </section>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ══════════════ TAB: MENU ══════════════ */}
-      {tab === "menu" && (
-        <div style={{ padding: "20px 20px 32px" }}>
-
-          {/* ── ประกาศ ── */}
-          <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18, padding: "16px", marginBottom: 16, boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 12 }}>📢 ประกาศถึงลูกค้า</div>
-            <button onClick={quickAnnounce} disabled={annSending} style={{
-              width: "100%", padding: "13px", background: T.green, color: "#fff",
-              border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700,
-              cursor: annSending ? "not-allowed" : "pointer", fontFamily: F, marginBottom: 8,
-              opacity: annSending ? 0.6 : 1,
-            }}>
-              {annSending ? "กำลังส่ง..." : "🔔 แจ้ง \"เมนูวันนี้อัปเดตแล้ว\""}
-            </button>
-            {!showAnn ? (
-              <Btn onClick={() => setShowAnn(true)} variant="ghost" style={{ width: "100%" }}>✏️ เขียนประกาศเอง</Btn>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <input value={annText} onChange={e => setAnnText(e.target.value)} placeholder="พิมพ์ข้อความประกาศ..."
-                  style={{ padding: "10px 14px", border: `1.5px solid ${T.green}`, borderRadius: 10, fontSize: 14, fontFamily: F, outline: "none", color: T.text }} />
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Btn onClick={handleAnnounce} disabled={annSending} variant="primary" style={{ flex: 1 }}>ส่งประกาศ</Btn>
-                  <Btn onClick={() => setShowAnn(false)} variant="ghost" style={{ flex: 1 }}>ยกเลิก</Btn>
-                </div>
               </div>
-            )}
-          </div>
-
-          {/* ── Category filter + เพิ่มเมนู ── */}
-          <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", overflowX: "auto", scrollbarWidth: "none" }}>
-            {CATS.map(c => (
-              <button key={c} onClick={() => setMenuCat(c)} style={{
-                padding: "7px 16px", borderRadius: 24, fontSize: 13, fontWeight: 600,
-                whiteSpace: "nowrap", cursor: "pointer",
-                border: menuCat === c ? "none" : `1px solid ${T.border}`,
-                background: menuCat === c ? T.green : T.surface,
-                color: menuCat === c ? "#fff" : T.textSub, fontFamily: F,
-              }}>{c}</button>
-            ))}
-            <Btn onClick={() => setShowAdd(!showAdd)} variant="amber" style={{ marginLeft: "auto", flexShrink: 0 }}>
-              + เพิ่มเมนู
-            </Btn>
-          </div>
-
-          {/* ── Form เพิ่มเมนู ── */}
-          {showAdd && (
-            <div style={{ background: T.surface, border: `1.5px solid ${T.amberB}`, borderRadius: 18, padding: "16px", marginBottom: 16 }}>
-              <div style={{ fontSize: 15, fontWeight: 800, color: T.text, marginBottom: 14 }}>🍽️ เพิ่มเมนูใหม่</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <input value={newEmoji} onChange={e => setNewEmoji(e.target.value)} placeholder="🍽️"
-                    style={{ width: 52, padding: "10px", border: `1.5px solid ${T.border}`, borderRadius: 10, fontSize: 18, textAlign: "center", fontFamily: F, color: T.text }} />
-                  <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ชื่อเมนู"
-                    style={{ flex: 1, padding: "10px 14px", border: `1.5px solid ${T.border}`, borderRadius: 10, fontSize: 14, fontFamily: F, color: T.text }} />
-                </div>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <input type="number" value={newPrice} onChange={e => setNewPrice(e.target.value)} placeholder="ราคา (บาท)"
-                    style={{ flex: 1, padding: "10px 14px", border: `1.5px solid ${T.border}`, borderRadius: 10, fontSize: 14, fontFamily: F, color: T.text }} />
-                  {!newCatCustom ? (
-                    <select value={newCat} onChange={e => { if (e.target.value === "__custom__") { setNewCatCustom(true); setNewCatText(""); } else setNewCat(e.target.value); }}
-                      style={{ flex: 1, padding: "10px 14px", border: `1.5px solid ${T.border}`, borderRadius: 10, fontSize: 14, fontFamily: F, color: T.text, background: T.surface }}>
-                      {allCats.map(c => <option key={c} value={c}>{c}</option>)}
-                      <option value="__custom__">+ หมวดใหม่...</option>
-                    </select>
-                  ) : (
-                    <div style={{ flex: 1, display: "flex", gap: 6 }}>
-                      <input value={newCatText} onChange={e => setNewCatText(e.target.value)} placeholder="ชื่อหมวดใหม่" autoFocus
-                        style={{ flex: 1, padding: "10px 14px", border: `1.5px solid ${T.amber}`, borderRadius: 10, fontSize: 14, fontFamily: F, color: T.text }} />
-                      <button onClick={() => { setNewCatCustom(false); setNewCatText(""); }}
-                        style={{ padding: "0 12px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 10, color: T.textSub, cursor: "pointer", fontSize: 14 }}>✕</button>
-                    </div>
-                  )}
-                </div>
-                <input value={newIng} onChange={e => setNewIng(e.target.value)} placeholder="วัตถุดิบ (ถ้ามี) เช่น หมูสับ, กระเพรา"
-                  style={{ padding: "10px 14px", border: `1.5px solid ${T.border}`, borderRadius: 10, fontSize: 14, fontFamily: F, color: T.text }} />
-                <div style={{ display: "flex", gap: 10 }}>
-                  <Btn onClick={handleAddMenu} disabled={adding} variant="amber" style={{ flex: 1, padding: "13px 0" }}>
-                    {adding ? "กำลังเพิ่ม..." : "✓ เพิ่มเมนูนี้"}
-                  </Btn>
-                  <Btn onClick={() => setShowAdd(false)} variant="ghost" style={{ flex: 1, padding: "13px 0" }}>ยกเลิก</Btn>
-                </div>
-              </div>
-            </div>
+            )
           )}
 
-          {/* ── รายการเมนู ── */}
-          {loadingMenu ? (
-            <div style={{ textAlign: "center", padding: 40, color: T.textMute }}>กำลังโหลด...</div>
-          ) : filtered.length === 0 ? (
-            <div style={{ textAlign: "center", padding: 40, color: T.textMute }}>ไม่มีเมนูในหมวดนี้</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {filtered.map(item => (
-                <div key={item.id} style={{
-                  background: T.surface, border: `1px solid ${item.available ? T.border : T.redB}`,
-                  borderRadius: 16, overflow: "hidden",
-                  boxShadow: "0 1px 4px rgba(0,0,0,.04)",
-                  opacity: item.available ? 1 : 0.65,
-                }}>
-                  <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 14 }}>
-                    {/* emoji */}
-                    <div style={{ width: 52, height: 52, borderRadius: 14, background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0, border: `1px solid ${T.border}` }}>
-                      {item.emoji}
-                    </div>
-                    {/* info */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: T.text, marginBottom: 3 }}>{item.name}</div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 16, fontWeight: 800, color: T.green }}>{item.price} ฿</span>
-                        <button onClick={() => editing === item.id ? setEditing(null) : openEdit(item)} style={{
-                          fontSize: 12, color: T.textSub, background: T.bg,
-                          border: `1px solid ${T.border}`, borderRadius: 8,
-                          padding: "3px 10px", cursor: "pointer", fontFamily: F, fontWeight: 600,
-                        }}>✏️ แก้ไข</button>
-                      </div>
-                      {(item as any).ingredients && (
-                        <div style={{ fontSize: 12, color: T.textMute, marginTop: 4 }}>🧂 {(item as any).ingredients}</div>
+          {/* ══════ เมนู ══════ */}
+          {tab === "menu" && (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, gap: 12, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {CATS.map(c => (
+                    <button key={c} onClick={() => setMenuCat(c)}
+                      style={{ padding: "6px 15px", borderRadius: 3, border: `1.5px solid ${C.ink}`, background: menuCat === c ? C.ink : "transparent", fontSize: 13, color: menuCat === c ? C.paper : C.ink, cursor: "pointer", fontWeight: 500, fontFamily: FD }}>
+                      {c}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setShowAdd(v => !v)} style={{ background: C.ink, color: C.paper, border: "none", borderRadius: 3, padding: "10px 18px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD }}>+ เพิ่มเมนู</button>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px,1fr))", gap: 16 }}>
+                <div onClick={() => setShowAdd(v => !v)} style={{ border: `1.5px dashed ${C.inkSoft}`, borderRadius: 3, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 175, cursor: "pointer", color: C.inkSoft, flexDirection: "column", gap: 6, fontWeight: 600, fontSize: 13, fontFamily: FD }}>
+                  <span style={{ fontSize: 22 }}>+</span><div>เพิ่มเมนูใหม่</div>
+                </div>
+
+                {showAdd && (
+                  <div style={{ gridColumn: "1 / -1", background: C.paper2, border: `1.5px solid ${C.ink}`, borderRadius: 4, padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                      <label style={{ width: 60, height: 60, borderRadius: 4, background: C.photoBg, border: `1px dashed ${C.inkSoft}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", overflow: "hidden", flexShrink: 0, color: C.inkSoft }}>
+                        {newImagePreview ? <img src={newImagePreview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconPhoto />}
+                        <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (!f) return; setNewImageFile(f); setNewImagePreview(URL.createObjectURL(f)); }} />
+                      </label>
+                      <input value={newEmoji} onChange={e => setNewEmoji(e.target.value)} placeholder="🍽️" style={{ width: 50, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 6px", textAlign: "center", fontSize: 16, fontFamily: FB, color: C.ink }} />
+                      <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="ชื่อเมนู" style={{ flex: 1, minWidth: 140, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
+                      <input type="number" value={newPrice} onChange={e => setNewPrice(e.target.value)} placeholder="ราคา" style={{ width: 100, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
+                      {!newCatCustom ? (
+                        <select value={newCat} onChange={e => { if (e.target.value === "__custom__") { setNewCatCustom(true); setNewCatText(""); } else setNewCat(e.target.value); }}
+                          style={{ minWidth: 140, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }}>
+                          {allCats.map(c => <option key={c} value={c}>{c}</option>)}
+                          <option value="__custom__">+ หมวดใหม่...</option>
+                        </select>
+                      ) : (
+                        <div style={{ display: "flex", gap: 6, minWidth: 140 }}>
+                          <input value={newCatText} onChange={e => setNewCatText(e.target.value)} placeholder="หมวดใหม่" autoFocus style={{ flex: 1, background: C.paper, border: `1.5px solid ${C.ochre}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
+                          <button onClick={() => { setNewCatCustom(false); setNewCatText(""); }} style={{ padding: "0 10px", background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, color: C.inkSoft, cursor: "pointer" }}>✕</button>
+                        </div>
                       )}
                     </div>
-                    {/* toggle */}
-                    <button onClick={() => handleToggle(item)} disabled={saving === item.id} style={{
-                      padding: "10px 18px", border: "none", borderRadius: 12,
-                      fontSize: 14, fontWeight: 800,
-                      cursor: saving === item.id ? "not-allowed" : "pointer",
-                      background: item.available ? T.green : T.redL,
-                      color: item.available ? "#fff" : T.red,
-                      flexShrink: 0, fontFamily: F, minWidth: 72,
-                      transition: "all .15s",
-                    }}>
-                      {saving === item.id ? "..." : item.available ? "เปิด" : "ปิด"}
-                    </button>
+                    <input value={newIng} onChange={e => setNewIng(e.target.value)} placeholder="วัตถุดิบ (ถ้ามี)" style={{ background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button onClick={() => setShowAdd(false)} style={{ background: "transparent", border: `1.5px solid ${C.inkSoft}`, color: C.inkSoft, borderRadius: 3, padding: "9px 18px", cursor: "pointer", fontFamily: FD }}>ยกเลิก</button>
+                      <button onClick={handleAddMenu} disabled={adding} style={{ background: C.sage, color: C.paper, border: "none", borderRadius: 3, padding: "9px 18px", fontWeight: 700, cursor: "pointer", fontFamily: FD }}>{adding ? (imgUploading ? "กำลังอัปโหลดรูป..." : "กำลังเพิ่ม...") : "บันทึก"}</button>
+                    </div>
                   </div>
+                )}
 
-                  {/* Edit form */}
-                  {editing === item.id && (
-                    <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${T.border}`, paddingTop: 14 }}>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                        {[
-                          { label: "ชื่อเมนู", val: editName, set: setEditName, type: "text" },
-                          { label: "ราคา (บาท)", val: editPrice, set: setEditPrice, type: "number" },
-                          { label: "วัตถุดิบ", val: editIng, set: setEditIng, type: "text" },
-                        ].map(f => (
-                          <div key={f.label}>
-                            <label style={{ fontSize: 12, color: T.textMute, fontWeight: 700, display: "block", marginBottom: 4 }}>{f.label}</label>
-                            <input type={f.type} value={f.val} onChange={e => f.set(e.target.value)}
-                              placeholder={f.label === "วัตถุดิบ" ? "เช่น หมูสับ, กระเพรา" : ""}
-                              style={{ width: "100%", padding: "10px 14px", border: `1.5px solid ${T.green}`, borderRadius: 10, fontSize: 14, fontFamily: F, outline: "none", color: T.text, boxSizing: "border-box" }} />
-                          </div>
-                        ))}
-                        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                          <Btn onClick={() => handleSave(item)} disabled={saving === item.id} variant="primary" style={{ flex: 1 }}>✓ บันทึก</Btn>
-                          <Btn onClick={() => setEditing(null)} variant="ghost" style={{ flex: 1 }}>ยกเลิก</Btn>
-                          <Btn onClick={() => setDeleteConfirm(item.id)} variant="danger">🗑</Btn>
+                {loadingMenu ? (
+                  <div style={{ color: C.inkSoft, padding: 20 }}>กำลังโหลด...</div>
+                ) : filtered.map(item => (
+                  <div key={item.id} style={{ gridColumn: editing === item.id ? "1 / -1" : undefined }}>
+                    <div style={{ background: C.paper2, border: `1px solid ${C.line}`, borderRadius: 3, overflow: "hidden", display: "flex", flexDirection: "column", opacity: item.available ? 1 : 0.45 }}>
+                      <div style={{ height: 115, background: C.photoBg, display: "flex", alignItems: "center", justifyContent: "center", color: C.inkSoft, overflow: "hidden" }}>
+                        {(item as any).image_url ? <img src={(item as any).image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconPhoto />}
+                      </div>
+                      <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
+                          <div style={{ fontWeight: 600, fontSize: 15, fontFamily: FD, color: C.ink }}>{item.name}</div>
+                          <div style={{ fontFamily: FM, fontWeight: 700, color: C.ochre, fontSize: 14 }}>{item.price}฿</div>
+                        </div>
+                        <div style={{ fontSize: 12, color: C.inkSoft, fontStyle: "italic" }}>{(item as any).ingredients || "—"}</div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 14px", borderTop: `1px dashed ${C.line}` }}>
+                        <label style={{ position: "relative", width: 36, height: 19, cursor: saving === item.id ? "not-allowed" : "pointer" }}>
+                          <input type="checkbox" checked={item.available} disabled={saving === item.id} onChange={() => handleToggle(item)} style={{ display: "none" }} />
+                          <div style={{ position: "absolute", inset: 0, background: item.available ? C.sageBg : C.line, border: `1px solid ${item.available ? C.sage : C.inkSoft}`, borderRadius: 999 }} />
+                          <div style={{ position: "absolute", top: 2, left: item.available ? 19 : 2, width: 15, height: 15, borderRadius: "50%", background: item.available ? C.sage : "#fff", border: `1px solid ${item.available ? C.sage : C.inkSoft}`, transition: "left .15s" }} />
+                        </label>
+                        <button onClick={() => openEdit(item)} style={{ width: 25, height: 25, border: `1.5px solid ${C.ink}`, background: C.paper, color: C.ink, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, fontSize: 12 }}>✎</button>
+                      </div>
+                    </div>
+
+                    {editing === item.id && (
+                      <div style={{ background: C.paper2, border: `1.5px solid ${C.ink}`, borderRadius: 4, padding: 16, marginTop: 8, display: "flex", flexDirection: "column", gap: 10 }}>
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                          <label style={{ width: 60, height: 60, borderRadius: 4, background: C.photoBg, border: `1px dashed ${C.inkSoft}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", overflow: "hidden", flexShrink: 0, color: C.inkSoft }}>
+                            {editImagePreview ? <img src={editImagePreview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconPhoto />}
+                            <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (!f) return; setEditImageFile(f); setEditImagePreview(URL.createObjectURL(f)); }} />
+                          </label>
+                          <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="ชื่อเมนู" style={{ flex: 1, minWidth: 140, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
+                          <input type="number" value={editPrice} onChange={e => setEditPrice(e.target.value)} placeholder="ราคา" style={{ width: 100, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
+                        </div>
+                        <input value={editIng} onChange={e => setEditIng(e.target.value)} placeholder="วัตถุดิบ" style={{ background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
+                        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                          <button onClick={() => setDeleteConfirm(item.id)} style={{ background: "transparent", border: `1.5px solid ${C.plum}`, color: C.plum, borderRadius: 3, padding: "9px 14px", cursor: "pointer", fontFamily: FD }}>ลบ</button>
+                          <button onClick={() => setEditing(null)} style={{ background: "transparent", border: `1.5px solid ${C.inkSoft}`, color: C.inkSoft, borderRadius: 3, padding: "9px 18px", cursor: "pointer", fontFamily: FD }}>ยกเลิก</button>
+                          <button onClick={() => handleSave(item)} disabled={saving === item.id} style={{ background: C.sage, color: C.paper, border: "none", borderRadius: 3, padding: "9px 18px", fontWeight: 700, cursor: "pointer", fontFamily: FD }}>{saving === item.id ? (imgUploading ? "กำลังอัปโหลดรูป..." : "กำลังบันทึก...") : "บันทึก"}</button>
                         </div>
                         {deleteConfirm === item.id && (
-                          <div style={{ background: T.redL, border: `1px solid ${T.redB}`, borderRadius: 12, padding: "14px" }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: T.red, marginBottom: 10 }}>⚠️ ลบ &quot;{item.name}&quot; ถาวร?</div>
+                          <div style={{ padding: 12, background: C.plumBg, borderRadius: 4 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: C.plum, marginBottom: 8, fontFamily: FB }}>⚠️ ลบ &quot;{item.name}&quot; ถาวร?</div>
                             <div style={{ display: "flex", gap: 8 }}>
-                              <Btn onClick={() => handleDeleteMenu(item)} variant="dangerFill" style={{ flex: 1 }}>ยืนยันลบ</Btn>
-                              <Btn onClick={() => setDeleteConfirm(null)} variant="ghost" style={{ flex: 1 }}>ไม่ลบ</Btn>
+                              <button onClick={() => handleDeleteMenu(item)} style={{ flex: 1, padding: 8, background: C.plum, color: C.paper, border: "none", borderRadius: 3, fontWeight: 700, cursor: "pointer", fontFamily: FD }}>ยืนยันลบ</button>
+                              <button onClick={() => setDeleteConfirm(null)} style={{ flex: 1, padding: 8, background: C.paper, color: C.inkSoft, border: `1px solid ${C.line}`, borderRadius: 3, cursor: "pointer", fontFamily: FD }}>ไม่ลบ</button>
                             </div>
                           </div>
                         )}
                       </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ══════════════ TAB: HISTORY ══════════════ */}
-      {tab === "history" && (() => {
-        const today = new Date(); today.setHours(0,0,0,0);
-        const todayOrders  = history.filter(o => new Date(o.created_at) >= today);
-        const doneOrders   = history.filter(o => o.status === "done");
-        const cancelOrders = history.filter(o => o.status === ("cancelled" as any));
-        const todayDone    = todayOrders.filter(o => o.status === "done");
-        return (
-          <div style={{ padding: "20px 20px 32px" }}>
-            {/* Filter */}
-            <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-              {[1,7,30].map(d => (
-                <button key={d} onClick={() => setHdays(d)} style={{
-                  flex: 1, padding: "12px 0", border: `2px solid ${hdays === d ? T.green : T.border}`,
-                  borderRadius: 14, background: hdays === d ? T.greenL : T.surface,
-                  color: hdays === d ? T.green : T.textSub, fontSize: 14, fontWeight: 700,
-                  cursor: "pointer", fontFamily: F,
-                }}>
-                  {d === 1 ? "วันนี้" : `${d} วัน`}
-                </button>
-              ))}
-            </div>
-
-            {/* Summary card */}
-            <div style={{ background: T.greenXL, border: `1.5px solid ${T.greenB}`, borderRadius: 18, padding: "16px", marginBottom: 16 }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: T.green, marginBottom: 12 }}>📊 สรุปวันนี้</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-                {[
-                  { label: "ทำเสร็จ", val: todayDone.length, color: T.green },
-                  { label: "ยกเลิก",  val: todayOrders.filter(o => o.status === ("cancelled" as any)).length, color: T.red },
-                  { label: "รายได้",  val: `${todayDone.reduce((s,o) => s+o.total,0).toLocaleString()}฿`, color: T.green },
-                ].map(s => (
-                  <div key={s.label} style={{ background: T.surface, borderRadius: 12, padding: "12px 10px", textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,.04)" }}>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.val}</div>
-                    <div style={{ fontSize: 11, color: T.textMute, fontWeight: 600, marginTop: 3 }}>{s.label}</div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
+          )}
 
-            {/* Total stats */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-              {[
-                { label: "ทั้งหมด",   val: history.length,     color: T.text },
-                { label: "เสร็จ",     val: doneOrders.length,  color: T.green },
-                { label: "ยกเลิก",   val: cancelOrders.length, color: T.red },
-              ].map(s => (
-                <div key={s.label} style={{ background: T.surface, borderRadius: 14, padding: "14px 10px", textAlign: "center", border: `1px solid ${T.border}` }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: s.color }}>{s.val}</div>
-                  <div style={{ fontSize: 11, color: T.textMute, fontWeight: 600, marginTop: 3 }}>{s.label}</div>
+          {/* ══════ ประวัติ ══════ */}
+          {tab === "history" && (() => {
+            const isDoneOf = (o: Order) => o.status === "done";
+            const isCancelOf = (o: Order) => o.status === ("cancelled" as any);
+            return (
+              <div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                  {[1,7,30].map(d => (
+                    <button key={d} onClick={() => setHdays(d)}
+                      style={{ padding: "6px 15px", borderRadius: 3, border: `1.5px solid ${C.ink}`, background: hdays === d ? C.ink : "transparent", color: hdays === d ? C.paper : C.ink, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: FD }}>
+                      {d === 1 ? "วันนี้" : `${d} วัน`}
+                    </button>
+                  ))}
                 </div>
-              ))}
-            </div>
-
-            {/* Order list */}
-            {history.length === 0 ? (
-              <div style={{ textAlign: "center", padding: 40, color: T.textMute, fontSize: 15 }}>ไม่มีรายการ</div>
-            ) : history.map(o => {
-              const isDone   = o.status === "done";
-              const isCancel = o.status === ("cancelled" as any);
-              return (
-                <div key={o.id} style={{
-                  background: T.surface, border: `1px solid ${isCancel ? T.redB : T.border}`,
-                  borderRadius: 16, padding: "14px 16px", marginBottom: 10,
-                  boxShadow: "0 1px 4px rgba(0,0,0,.04)",
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                    <div>
-                      <span style={{ fontSize: 16, fontWeight: 800, color: isCancel ? T.textSub : T.text }}>{o.customer_name}</span>
-                      <span style={{ fontSize: 13, color: T.textMute, marginLeft: 8 }}>#{String(o.id).padStart(4,"0")}</span>
-                    </div>
-                    <Badge
-                      label={isDone ? "✅ เสร็จ" : isCancel ? "❌ ยกเลิก" : "🟡 ค้าง"}
-                      color={isDone ? T.green : isCancel ? T.red : T.amber}
-                      bg={isDone ? T.greenL : isCancel ? T.redL : T.amberL}
-                    />
+                {history.length === 0 ? (
+                  <div style={{ color: C.inkSoft, padding: 10 }}>ยังไม่มีประวัติ</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    {history.map(o => (
+                      <div key={o.id} style={{ display: "grid", gridTemplateColumns: "90px 90px 1fr 100px", gap: 14, alignItems: "center", padding: "12px 6px", borderBottom: `1px dashed ${C.line}`, fontSize: 13.5 }}>
+                        <span style={{ fontFamily: FM, color: C.inkSoft }}>{fmtDate(o.created_at)}</span>
+                        <span style={{ fontFamily: FM, fontWeight: 600, color: C.ink }}>{orderCode(o.id)}</span>
+                        <span style={{ color: C.inkSoft, fontSize: 12.5, fontStyle: "italic", textDecoration: isCancelOf(o) ? "line-through" : "none" }}>{o.items.map(it => `${it.name} x${it.qty}`).join(", ")}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 3, textAlign: "center", fontFamily: FD, background: isDoneOf(o) ? C.sageBg : C.plumBg, color: isDoneOf(o) ? C.sage : C.plum }}>
+                          {isDoneOf(o) ? "เสร็จสิ้น" : "ยกเลิก"}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                  <div style={{ fontSize: 13, color: T.textMute, marginBottom: 6 }}>
-                    {(o as any).departments?.name ?? o.dept_id} · {fmtDate(o.created_at)}
-                  </div>
-                  <div style={{ fontSize: 14, color: isCancel ? T.textMute : T.text, textDecoration: isCancel ? "line-through" : "none", marginBottom: isDone ? 8 : 0 }}>
-                    {o.items.map(it => `${it.name} ×${it.qty}`).join("  ·  ")}
-                  </div>
-                  {isDone && (
-                    <div style={{ fontSize: 16, fontWeight: 800, color: T.green, textAlign: "right" }}>{o.total} บาท</div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })()}
-    </div>
+                )}
+              </div>
+            );
+          })()}
+        </section>
+      </div>
+    </>
   );
 }

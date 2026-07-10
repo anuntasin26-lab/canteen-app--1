@@ -197,20 +197,6 @@ export async function getOrderHistory(days = 7) {
   return data;
 }
 
-export async function getDeptHistory(deptId: string, days = 7) {
-  const from = new Date();
-  from.setDate(from.getDate() - days);
-  from.setHours(0, 0, 0, 0);
-  const { data, error } = await supabase
-    .from("orders")
-    .select("*")
-    .eq("dept_id", deptId)
-    .gte("created_at", from.toISOString())
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return data;
-}
-
 export async function createOrder(payload: {
   dept_id: string;
   customer_name: string;

@@ -5,9 +5,7 @@
 // ─────────────────────────────────────────────────────────
 
 import { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import {
-  getDepartmentById,
   getAllDepartments,
   getMenuItems,
   createOrder,
@@ -45,12 +43,7 @@ const S = {
 
 // ── Inner component ───────────────────────────────────────
 function OrderFlow() {
-  const params  = useSearchParams();
-  const deptId  = params.get("dept") ?? ""; // ยังรองรับ URL เดิมไว้ด้วย
-
   const [dept,        setDept]        = useState<Department | null>(null);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [selectedDeptId, setSelectedDeptId] = useState("");
   const [menuItems,   setMenuItems]   = useState<MenuItem[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState<string | null>(null);
@@ -75,119 +68,48 @@ function OrderFlow() {
   // ── ฟีเจอร์ยกเลิก ─────────────────────────────────────
   const [cancelling,   setCancelling]   = useState(false);
 
-  // ── โหลด dept + menu + ตรวจ localStorage ──────────────
+  // ── โหลดแผนก (อัตโนมัติ ไม่มีให้เลือกแล้ว) + เมนู + ตรวจ localStorage ──
   useEffect(() => {
-    // รองรับทั้ง URL เดิม (?dept=xxx) และ URL ใหม่ (ไม่มี dept)
-    if (!deptId) {
-      const savedName    = localStorage.getItem(LS_NAME) ?? "";
-      const savedOrderId = localStorage.getItem(LS_ORDER_ID);
-      const savedScreen  = localStorage.getItem(LS_SCREEN);
-      const savedDeptId  = localStorage.getItem("petpal_dept_id");
-
-      Promise.all([getAllDepartments(), getMenuItems()])
-        .then(async ([depts, m]) => {
-          const deptsTyped = depts as Department[];
-          setDepartments(deptsTyped);
-          setMenuItems(m as MenuItem[]);
-
-          // restore ชื่อ
-          if (savedName) setName(savedName);
-
-          // restore แผนกที่เคยเลือก
-          if (savedDeptId) {
-            const found = deptsTyped.find(d => d.id === savedDeptId);
-            if (found) { setDept(found); setSelectedDeptId(savedDeptId); }
-          }
-
-          // restore order ถ้ามี
-          let restoredToOrder = false;
-          if (savedOrderId) {
-            try {
-              const { data, error: oErr } = await supabase
-                .from("orders").select("*").eq("id", Number(savedOrderId)).single();
-              if (!oErr && data) {
-                const orderDate = new Date(data.created_at);
-                const today = new Date();
-                const sameDay =
-                  orderDate.getFullYear() === today.getFullYear() &&
-                  orderDate.getMonth()    === today.getMonth()    &&
-                  orderDate.getDate()     === today.getDate();
-                if (sameDay && data.status !== "cancelled") {
-                  setOrder(data); setScreen("status"); restoredToOrder = true;
-                } else { localStorage.removeItem(LS_ORDER_ID); }
-              } else { localStorage.removeItem(LS_ORDER_ID); }
-            } catch { localStorage.removeItem(LS_ORDER_ID); }
-          }
-
-          // restore screen
-          if (!restoredToOrder && savedName && savedDeptId && savedScreen &&
-              ["menu","cart","custom"].includes(savedScreen)) {
-            setScreen(savedScreen as any);
-          }
-        })
-        .catch(() => setError("โหลดข้อมูลไม่ได้ กรุณาลองใหม่"))
-        .finally(() => setLoading(false));
-      return;
-    }
-
     const savedName    = localStorage.getItem(LS_NAME) ?? "";
     const savedOrderId = localStorage.getItem(LS_ORDER_ID);
-    const savedScreen  = localStorage.getItem(LS_SCREEN); // "menu" | "cart" | "custom" | null
+    const savedScreen  = localStorage.getItem(LS_SCREEN);
 
-    Promise.all([getDepartmentById(deptId), getMenuItems()])
-      .then(async ([d, m]) => {
-        setDept(d);
-        setMenuItems(m);
+    Promise.all([getAllDepartments(), getMenuItems()])
+      .then(async ([depts, m]) => {
+        // ไม่มีการเลือกแผนกแล้ว — ใช้แผนกแรกที่มีในระบบเสมอ (เบื้องหลัง ผู้ใช้ไม่เห็น)
+        const deptsTyped = depts as Department[];
+        if (deptsTyped[0]) setDept(deptsTyped[0]);
+        setMenuItems(m as MenuItem[]);
 
-        // ถ้ามีชื่อค้างไว้ → ใส่ชื่อกลับมา
         if (savedName) setName(savedName);
 
-        // ถ้ามี orderId ค้างไว้ → โหลด order กลับมาแสดงหน้า status
-        // (ลำดับความสำคัญสูงสุด — ออร์เดอร์ที่รออยู่ต้องมาก่อนเสมอ)
         let restoredToOrder = false;
         if (savedOrderId) {
           try {
             const { data, error: oErr } = await supabase
-              .from("orders")
-              .select("*")
-              .eq("id", Number(savedOrderId))
-              .single();
-
+              .from("orders").select("*").eq("id", Number(savedOrderId)).single();
             if (!oErr && data) {
-              // ตรวจว่า order ยังเป็นของวันนี้อยู่
               const orderDate = new Date(data.created_at);
-              const today     = new Date();
-              const sameDay   =
+              const today = new Date();
+              const sameDay =
                 orderDate.getFullYear() === today.getFullYear() &&
                 orderDate.getMonth()    === today.getMonth()    &&
                 orderDate.getDate()     === today.getDate();
-
               if (sameDay && data.status !== "cancelled") {
-                setOrder(data);
-                setScreen("status");
-                restoredToOrder = true;
-              } else {
-                // order เก่าแล้ว หรือถูกยกเลิกแล้ว → ล้าง
-                localStorage.removeItem(LS_ORDER_ID);
-              }
-            } else {
-              localStorage.removeItem(LS_ORDER_ID);
-            }
-          } catch {
-            localStorage.removeItem(LS_ORDER_ID);
-          }
+                setOrder(data); setScreen("status"); restoredToOrder = true;
+              } else { localStorage.removeItem(LS_ORDER_ID); }
+            } else { localStorage.removeItem(LS_ORDER_ID); }
+          } catch { localStorage.removeItem(LS_ORDER_ID); }
         }
 
-        // ไม่มี order ค้าง แต่มีชื่อ + เคยอยู่หน้า menu/cart/custom
-        // → restore กลับไปหน้านั้น ไม่ดีดกลับไปหน้ากรอกชื่อ (fix #2)
         if (!restoredToOrder && savedName && savedScreen &&
-            (savedScreen === "menu" || savedScreen === "cart" || savedScreen === "custom")) {
-          setScreen(savedScreen);
+            ["menu","cart","custom"].includes(savedScreen)) {
+          setScreen(savedScreen as any);
         }
       })
       .catch(() => setError("โหลดข้อมูลไม่ได้ กรุณาลองใหม่"))
       .finally(() => setLoading(false));
-  }, [deptId]);
+  }, []);
 
   // ── ประกาศ realtime ────────────────────────────────────
   useEffect(() => {
@@ -251,19 +173,8 @@ function OrderFlow() {
     }
   };
 
-  // ── เลือกแผนก (กรณีไม่มี dept ใน URL) ───────────────────────────────
-  const handleSelectDept = (dId: string) => {
-    setSelectedDeptId(dId);
-    const found = departments.find(d => d.id === dId);
-    if (found) {
-      setDept(found as Department);
-      localStorage.setItem("petpal_dept_id", dId); // จำแผนกที่เลือกไว้
-    }
-  };
-
   // ── บันทึกชื่อแล้วไปหน้า menu ─────────────────────────
   const handleGoMenu = () => {
-    if (!deptId && !dept) { alert("กรุณาเลือกแผนกก่อน"); return; }
     localStorage.setItem(LS_NAME, name.trim());
     localStorage.setItem(LS_SCREEN, "menu");
     setScreen("menu");
@@ -390,15 +301,9 @@ function OrderFlow() {
       <p style={{ color: "#7A7570" }}>กำลังโหลด...</p>
     </div>
   );
-  // ถ้าไม่มี deptId ใน URL = user ยังไม่ได้เลือกแผนก → ไม่ error แค่รอ
   if (error) return (
     <div style={{ ...S.app, alignItems: "center", justifyContent: "center", padding: 24 }}>
       <p style={{ color: "#C0392B", textAlign: "center" }}>{error}</p>
-    </div>
-  );
-  if (!dept && deptId) return (
-    <div style={{ ...S.app, alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <p style={{ color: "#C0392B", textAlign: "center" }}>ไม่พบข้อมูลแผนก</p>
     </div>
   );
 
@@ -409,42 +314,23 @@ function OrderFlow() {
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 52, marginBottom: 12 }}>🍽️</div>
           <div style={{ fontSize: 22, fontWeight: 700, color: "#1C1A17", marginBottom: 8 }}>สั่งอาหารได้เลย</div>
-          {dept && <span style={S.badge}>แผนก{dept.name}</span>}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {/* ถ้าไม่มี dept จาก URL → แสดง dropdown เลือกแผนก */}
-          {!deptId && departments.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: "#7A7570", letterSpacing: ".04em", textTransform: "uppercase" as const }}>
-                แผนกของคุณ
-              </label>
-              <select
-                value={selectedDeptId}
-                onChange={(e) => handleSelectDept(e.target.value)}
-                style={{ padding: "14px 16px", border: "1.5px solid #E2DDD6", borderRadius: 12, fontSize: 15, fontFamily: "Sarabun, sans-serif", background: "#F5F3EE", color: selectedDeptId ? "#1C1A17" : "#7A7570", outline: "none", appearance: "none" as const }}
-              >
-                <option value="">— เลือกแผนก —</option>
-                {departments.map(d => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
           <label style={{ fontSize: 12, fontWeight: 600, color: "#7A7570", letterSpacing: ".04em", textTransform: "uppercase" as const }}>
             ชื่อของคุณ
           </label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && name.trim() && dept && handleGoMenu()}
+            onKeyDown={(e) => e.key === "Enter" && name.trim() && handleGoMenu()}
             placeholder="เช่น สมชาย, วิไล..."
             autoFocus
             style={{ padding: "14px 16px", border: "1.5px solid #E2DDD6", borderRadius: 12, fontSize: 16, fontFamily: "Sarabun, sans-serif", background: "#F5F3EE", outline: "none" }}
           />
           <button
-            disabled={!name.trim() || !dept}
+            disabled={!name.trim()}
             onClick={handleGoMenu}
-            style={{ padding: 14, background: (name.trim() && dept) ? "#3B6B0F" : "#E2DDD6", color: (name.trim() && dept) ? "#fff" : "#7A7570", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: (name.trim() && dept) ? "pointer" : "not-allowed", fontFamily: "Sarabun, sans-serif" }}
+            style={{ padding: 14, background: name.trim() ? "#3B6B0F" : "#E2DDD6", color: name.trim() ? "#fff" : "#7A7570", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: name.trim() ? "pointer" : "not-allowed", fontFamily: "Sarabun, sans-serif" }}
           >
             ดูเมนู →
           </button>
@@ -460,9 +346,7 @@ function OrderFlow() {
         <button onClick={() => order ? setScreen("status") : (localStorage.removeItem(LS_SCREEN), setScreen("name"))} style={{ width: 30, height: 30, borderRadius: "50%", border: "1px solid #E2DDD6", background: "#F5F3EE", cursor: "pointer", fontSize: 16 }}>←</button>
         <div>
           <div style={S.title}>สวัสดี, {name}</div>
-          <div style={S.sub}>แผนก{dept.name}</div>
         </div>
-        <span style={S.badge}>{dept.name}</span>
       </div>
       {showBanner && announcement && (
         <div style={{ margin: "10px 16px 0", padding: "10px 14px", background: "#FEF3DC", borderRadius: 10, fontSize: 13, fontWeight: 600, color: "#C97A14", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -555,10 +439,10 @@ function OrderFlow() {
           style={{ padding: "12px 14px", border: "1.5px solid #E2DDD6", borderRadius: 12, fontSize: 14, fontFamily: "Sarabun, sans-serif", background: "#F5F3EE", resize: "none", outline: "none" }}
         />
         <div style={{ border: "1px solid #E2DDD6", borderRadius: 12, overflow: "hidden" }}>
-          {[["ชื่อผู้สั่ง", name], ["แผนก", dept.name], ["รวมทั้งหมด", `${total} บาท`]].map(([label, val], i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "9px 14px", fontSize: i === 2 ? 14 : 13, fontWeight: i === 2 ? 700 : 400, borderBottom: i < 2 ? "1px solid #E2DDD6" : "none" }}>
+          {[["ชื่อผู้สั่ง", name], ["รวมทั้งหมด", `${total} บาท`]].map(([label, val], i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "9px 14px", fontSize: i === 1 ? 14 : 13, fontWeight: i === 1 ? 700 : 400, borderBottom: i < 1 ? "1px solid #E2DDD6" : "none" }}>
               <span style={{ color: "#7A7570" }}>{label}</span>
-              <span style={{ color: i === 2 ? "#3B6B0F" : "#1C1A17", fontWeight: i === 2 ? 700 : 500 }}>{val}</span>
+              <span style={{ color: i === 1 ? "#3B6B0F" : "#1C1A17", fontWeight: i === 1 ? 700 : 500 }}>{val}</span>
             </div>
           ))}
         </div>
@@ -582,9 +466,8 @@ function OrderFlow() {
         <button onClick={() => goTo("menu")} style={{ width: 30, height: 30, borderRadius: "50%", border: "1px solid #E2DDD6", background: "#F5F3EE", cursor: "pointer", fontSize: 16 }}>←</button>
         <div>
           <div style={S.title}>สั่งตามสั่ง</div>
-          <div style={S.sub}>{name} · แผนก{dept?.name}</div>
+          <div style={S.sub}>{name}</div>
         </div>
-        <span style={S.badge}>{dept?.name}</span>
       </div>
       <div style={{ flex: 1, padding: "20px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ padding: "14px 16px", background: "#FEF3DC", borderRadius: 14, fontSize: 13, color: "#A8650E", fontWeight: 600 }}>
@@ -611,8 +494,8 @@ function OrderFlow() {
           />
         </div>
         <div style={{ border: "1px solid #E2DDD6", borderRadius: 12, overflow: "hidden" }}>
-          {[["ชื่อผู้สั่ง", name], ["แผนก", dept?.name ?? ""]].map(([label, val], i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "9px 14px", fontSize: 13, borderBottom: i < 1 ? "1px solid #E2DDD6" : "none" }}>
+          {[["ชื่อผู้สั่ง", name]].map(([label, val], i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "9px 14px", fontSize: 13 }}>
               <span style={{ color: "#7A7570" }}>{label}</span>
               <span style={{ color: "#1C1A17", fontWeight: 500 }}>{val}</span>
             </div>
@@ -638,7 +521,7 @@ function OrderFlow() {
         <div style={{ fontSize: 22, fontWeight: 700, color: "#1C1A17" }}>ส่งรายการให้ครัวแล้ว!</div>
         <div style={{ fontSize: 14, color: "#7A7570" }}>ครัวจะรับทราบรายการของคุณในไม่ช้า</div>
         <div style={{ padding: "12px 20px", background: "#F5F3EE", borderRadius: 14, fontSize: 13, color: "#5C5852", textAlign: "left", width: "100%", lineHeight: 1.8 }}>
-          👤 {name} · แผนก{dept?.name}
+          👤 {name}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
           <button onClick={() => goTo("custom")}
