@@ -1,11 +1,9 @@
 "use client";
 // ─── app/menu-history/page.tsx ────────────────────────────
-// ดูเมนูย้อนหลัง — ครัวเข้าผ่าน PIN เดียวกัน
+// ดูเมนูย้อนหลัง — ครัวเข้าผ่าน Supabase Auth เดียวกับหน้าครัว
 
 import { useEffect, useState } from "react";
-import { getMenuHistory } from "@/lib/supabase";
-
-const MENU_PIN = process.env.NEXT_PUBLIC_KITCHEN_PIN ?? "1234";
+import { getMenuHistory, signInStaff, signOutStaff } from "@/lib/supabase";
 
 const C = {
   green: "#3B6B0F", greenL: "#EBF3DC",
@@ -17,35 +15,33 @@ const fmtDate = (s: string) =>
   new Date(s).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 export default function MenuHistoryPage() {
-  const [pin,      setPin]      = useState("");
-  const [unlocked, setUnlocked] = useState(false);
-  const [pinError, setPinError] = useState(false);
-  const [checkingSession, setCheckingSession] = useState(true);
+  const [email,      setEmail]      = useState("");
+  const [password,   setPassword]   = useState("");
+  const [unlocked,   setUnlocked]   = useState(false);
+  const [loginError, setLoginError] = useState(false);
+  const [loggingIn,  setLoggingIn]  = useState(false);
   const [logs,     setLogs]     = useState<any[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [days,     setDays]     = useState(7);
 
-  const handlePin = (p: string) => {
-    setPin(p);
-    if (p.length === 4) {
-      if (p === MENU_PIN) {
-        setUnlocked(true);
-        setPinError(false);
-        sessionStorage.setItem("kitchen_unlocked", "1");
-      }
-      else { setPinError(true); setTimeout(() => { setPin(""); setPinError(false); }, 800); }
+  const handleLogin = async () => {
+    if (!email.trim() || !password) return;
+    setLoggingIn(true);
+    setLoginError(false);
+    try {
+      await signInStaff(email.trim(), password);
+      setUnlocked(true);
+    } catch {
+      setLoginError(true);
+    } finally {
+      setLoggingIn(false);
     }
   };
 
-  // ตรวจ sessionStorage ตอนโหลดหน้า — refresh แล้วไม่ต้องใส่ PIN ซ้ำ
-  useEffect(() => {
-    if (sessionStorage.getItem("kitchen_unlocked") === "1") setUnlocked(true);
-    setCheckingSession(false);
-  }, []);
-
-  const handleLock = () => {
+  const handleLock = async () => {
+    await signOutStaff();
     setUnlocked(false);
-    sessionStorage.removeItem("kitchen_unlocked");
+    setEmail(""); setPassword("");
   };
 
   useEffect(() => {
@@ -62,33 +58,33 @@ export default function MenuHistoryPage() {
     grouped[day].push(log);
   });
 
-  if (checkingSession) return (
-    <div style={{ minHeight: "100dvh", background: C.bg }} />
-  );
-
   if (!unlocked) return (
     <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: C.bg, fontFamily: "Sarabun, sans-serif", padding: 24 }}>
       <div style={{ fontSize: 48, marginBottom: 12 }}>🕐</div>
       <div style={{ fontSize: 20, fontWeight: 700, color: C.text, marginBottom: 4 }}>ประวัติเมนู</div>
-      <div style={{ fontSize: 13, color: C.muted, marginBottom: 32 }}>ใส่ PIN เพื่อเข้าใช้งาน</div>
-      <div style={{ display: "flex", gap: 16, marginBottom: 32 }}>
-        {[0,1,2,3].map(i => (
-          <div key={i} style={{ width: 18, height: 18, borderRadius: "50%", background: pin.length > i ? (pinError ? C.red : C.green) : C.border, transition: "background .15s" }} />
-        ))}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, maxWidth: 240, width: "100%" }}>
-        {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((n, i) => (
-          <button key={i}
-            onClick={() => {
-              if (n === "⌫") setPin(p => p.slice(0,-1));
-              else if (n !== "") handlePin(pin + String(n));
-            }}
-            style={{ padding: "18px 0", border: `1px solid ${C.border}`, borderRadius: 12, background: n === "" ? "transparent" : "#fff", fontSize: 20, fontWeight: 600, cursor: n === "" ? "default" : "pointer", color: C.text, fontFamily: "Sarabun, sans-serif" }}>
-            {n}
-          </button>
-        ))}
-      </div>
-      {pinError && <div style={{ color: C.red, fontSize: 13, marginTop: 16, fontWeight: 600 }}>PIN ไม่ถูกต้อง</div>}
+      <div style={{ fontSize: 13, color: C.muted, marginBottom: 28 }}>เข้าสู่ระบบเพื่อใช้งาน</div>
+      <form
+        onSubmit={(e) => { e.preventDefault(); handleLogin(); }}
+        style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 280, width: "100%" }}
+      >
+        <input
+          type="email" autoComplete="username" placeholder="อีเมล" value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          style={{ padding: "13px 14px", border: `1px solid ${C.border}`, borderRadius: 10, fontSize: 16, fontFamily: "Sarabun, sans-serif", background: "#fff", color: C.text }}
+        />
+        <input
+          type="password" autoComplete="current-password" placeholder="รหัสผ่าน" value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          style={{ padding: "13px 14px", border: `1px solid ${C.border}`, borderRadius: 10, fontSize: 16, fontFamily: "Sarabun, sans-serif", background: "#fff", color: C.text }}
+        />
+        <button
+          type="submit" disabled={loggingIn || !email.trim() || !password}
+          style={{ padding: "13px 0", border: "none", borderRadius: 10, background: C.green, color: "#fff", fontSize: 15, fontWeight: 600, fontFamily: "Sarabun, sans-serif", cursor: loggingIn ? "default" : "pointer", opacity: loggingIn ? 0.6 : 1 }}
+        >
+          {loggingIn ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+        </button>
+      </form>
+      {loginError && <div style={{ color: C.red, fontSize: 13, marginTop: 16, fontWeight: 600 }}>อีเมลหรือรหัสผ่านไม่ถูกต้อง</div>}
     </div>
   );
 
@@ -99,7 +95,7 @@ export default function MenuHistoryPage() {
           <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>🕐 ประวัติเมนู</div>
           <div style={{ fontSize: 11, color: C.muted }}>การแก้ไขเมนูที่ผ่านมา</div>
         </div>
-        <button onClick={handleLock} style={{ padding: "5px 10px", background: C.redL, border: `1px solid #F5B4AE`, borderRadius: 20, fontSize: 11, fontWeight: 600, color: C.red, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>🔒 ล็อก</button>
+        <button onClick={handleLock} style={{ padding: "5px 10px", background: C.redL, border: `1px solid #F5B4AE`, borderRadius: 20, fontSize: 11, fontWeight: 600, color: C.red, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>🔒 ออกจากระบบ</button>
       </div>
 
       <div style={{ display: "flex", gap: 6, padding: "12px 16px" }}>

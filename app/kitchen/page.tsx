@@ -1,6 +1,6 @@
 "use client";
 // ─── app/kitchen/page.tsx ─────────────────────────────────
-// รวม: ออเดอร์ (Clipboard tickets) + จัดการเมนู + ประวัติ — PIN เดียว
+// รวม: ออเดอร์ (Clipboard tickets) + จัดการเมนู + ประวัติ — login ด้วย Supabase Auth
 // Redesign: "prep clipboard" paper theme — เอกสารกระดาษ/ใบสั่งครัว
 
 import { useEffect, useRef, useState } from "react";
@@ -14,13 +14,12 @@ import {
   getTodayCustomOrders, updateCustomOrderStatus, cancelCustomOrder,
   subscribeToCustomOrders,
   uploadMenuImage, deleteMenuImage,
+  signInStaff, signOutStaff,
+  flagOrderName,
 } from "@/lib/supabase";
 import type { CustomOrder } from "@/lib/supabase";
 import type { Order } from "@/types";
 import type { MenuItem } from "@/types";
-
-// ── PIN ───────────────────────────────────────────────────
-const KITCHEN_PIN = process.env.NEXT_PUBLIC_KITCHEN_PIN ?? "1234";
 
 // ── Helpers ───────────────────────────────────────────────
 const fmtElapsed = (s: string, ref?: string | null) => {
@@ -90,11 +89,11 @@ const stateTagStyle = (kind: "pending" | "cooking" | "attn") => ({
 // ─────────────────────────────────────────────────────────
 export default function KitchenPage() {
   // ── Auth ──────────────────────────────────────────────
-  const [pin,       setPin]       = useState("");
-  const [unlocked,  setUnlocked]  = useState(() =>
-    typeof window !== "undefined" && sessionStorage.getItem("kitchen_unlocked") === "1"
-  );
-  const [pinError,  setPinError]  = useState(false);
+  const [email,      setEmail]      = useState("");
+  const [password,   setPassword]   = useState("");
+  const [unlocked,   setUnlocked]   = useState(false);
+  const [loginError, setLoginError] = useState(false);
+  const [loggingIn,  setLoggingIn]  = useState(false);
 
   // ── Clock ─────────────────────────────────────────────
   const [now, setNow] = useState(new Date());
@@ -135,6 +134,7 @@ export default function KitchenPage() {
   const [editName,   setEditName]   = useState("");
   const [editPrice,  setEditPrice]  = useState("");
   const [editIng,    setEditIng]    = useState("");
+  const [editDailyLimit, setEditDailyLimit] = useState("");
   const [editImageFile,    setEditImageFile]    = useState<File | null>(null);
   const [editImagePreview, setEditImagePreview] = useState<string | null>(null);
   const [saving,     setSaving]     = useState<number | null>(null);
@@ -147,28 +147,43 @@ export default function KitchenPage() {
   const [newCatText,   setNewCatText]   = useState("");
   const [newEmoji,   setNewEmoji]   = useState("🍽️");
   const [newIng,     setNewIng]     = useState("");
+  const [newDailyLimit, setNewDailyLimit] = useState("");
   const [newImageFile,    setNewImageFile]    = useState<File | null>(null);
   const [newImagePreview, setNewImagePreview] = useState<string | null>(null);
   const [imgUploading, setImgUploading] = useState(false);
   const [adding,     setAdding]     = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
-  // ── PIN handler ───────────────────────────────────────
-  const handlePin = (p: string) => {
-    setPin(p);
-    if (p.length === 4) {
-      if (p === KITCHEN_PIN) {
-        setUnlocked(true); setPinError(false);
-        sessionStorage.setItem("kitchen_unlocked", "1");
-      } else {
-        setPinError(true);
-        setTimeout(() => { setPin(""); setPinError(false); }, 800);
-      }
+  // ── Login handler (Supabase Auth) ──────────────────────
+  const handleLogin = async () => {
+    if (!email.trim() || !password) return;
+    setLoggingIn(true);
+    setLoginError(false);
+    try {
+      await signInStaff(email.trim(), password);
+      setUnlocked(true);
+    } catch {
+      setLoginError(true);
+    } finally {
+      setLoggingIn(false);
     }
   };
-  const handleLock = () => {
-    if (!window.confirm("ล็อกหน้าจอและกลับไปหน้าใส่ PIN?")) return;
-    setUnlocked(false); sessionStorage.removeItem("kitchen_unlocked");
+  const handleLock = async () => {
+    if (!window.confirm("ออกจากระบบและกลับไปหน้า login?")) return;
+    await signOutStaff();
+    setUnlocked(false);
+    setEmail(""); setPassword("");
+  };
+
+  // ── Flag ชื่อที่หลุดผ่าน blacklist มาได้ — เข้าคิว /admin ตรวจสอบ ──
+  const handleFlag = async (orderId: number, name: string) => {
+    if (!window.confirm(`รายงานชื่อ "${name}" ว่าไม่เหมาะสม?`)) return;
+    try {
+      await flagOrderName(orderId, name);
+      showMenuToast("รายงานแล้ว — แอดมินจะตรวจสอบทีหลัง");
+    } catch (e: any) {
+      alert("รายงานไม่สำเร็จ: " + (e?.message ?? ""));
+    }
   };
 
   // ── เสียง ─────────────────────────────────────────────
@@ -212,7 +227,7 @@ export default function KitchenPage() {
     if (!unlocked) return;
     const ch = subscribeToOrders((payload) => {
       if (payload.eventType === "INSERT") {
-        supabase.from("orders").select("*, departments(id,name)").eq("id", payload.new.id).single()
+        supabase.from("orders_with_items").select("*").eq("id", payload.new.id).single()
           .then(({ data }) => {
             if (data) { setOrders(p => [data as Order, ...p]); setToast(true); setTimeout(() => setToast(false), 3000); playBeep(); }
           });
@@ -354,6 +369,7 @@ export default function KitchenPage() {
     setEditing(editing === item.id ? null : item.id);
     setEditName(item.name);
     setEditPrice(String(item.price)); setEditIng((item as any).ingredients ?? "");
+    setEditDailyLimit(item.daily_limit != null ? String(item.daily_limit) : "");
     setEditImageFile(null); setEditImagePreview((item as any).image_url ?? null);
   };
 
@@ -361,6 +377,10 @@ export default function KitchenPage() {
     const p = parseInt(editPrice);
     if (!editName.trim()) { alert("กรุณากรอกชื่อเมนู"); return; }
     if (!p || p <= 0) { alert("ราคาไม่ถูกต้อง"); return; }
+    const dailyLimit = editDailyLimit.trim() === "" ? null : parseInt(editDailyLimit);
+    if (dailyLimit !== null && (!Number.isFinite(dailyLimit) || dailyLimit <= 0)) {
+      alert("จำนวนจำกัด/วัน ต้องเป็นตัวเลขมากกว่า 0 (เว้นว่างถ้าไม่จำกัด)"); return;
+    }
     setSaving(item.id);
     try {
       let image_url = (item as any).image_url ?? null;
@@ -371,8 +391,8 @@ export default function KitchenPage() {
         image_url = uploaded;
         setImgUploading(false);
       }
-      await updateMenuItem(item.id, { name: editName.trim(), price: p, ingredients: editIng.trim(), image_url });
-      setItems(prev => prev.map(m => m.id === item.id ? { ...m, name: editName.trim(), price: p, ingredients: editIng.trim(), image_url } as any : m));
+      await updateMenuItem(item.id, { name: editName.trim(), price: p, ingredients: editIng.trim(), image_url, daily_limit: dailyLimit });
+      setItems(prev => prev.map(m => m.id === item.id ? { ...m, name: editName.trim(), price: p, ingredients: editIng.trim(), image_url, daily_limit: dailyLimit } as any : m));
       setEditing(null); setEditImageFile(null); setEditImagePreview(null);
       showMenuToast(`อัปเดต "${editName.trim()}" แล้ว`);
     } catch (e: any) { alert("บันทึกไม่สำเร็จ: " + (e?.message ?? "")); setImgUploading(false); }
@@ -385,6 +405,10 @@ export default function KitchenPage() {
     if (!p || p <= 0) { alert("ราคาไม่ถูกต้อง"); return; }
     const finalCat = newCatCustom ? newCatText.trim() : newCat;
     if (!finalCat) { alert("กรุณาเลือกหรือพิมพ์หมวดหมู่"); return; }
+    const dailyLimit = newDailyLimit.trim() === "" ? null : parseInt(newDailyLimit);
+    if (dailyLimit !== null && (!Number.isFinite(dailyLimit) || dailyLimit <= 0)) {
+      alert("จำนวนจำกัด/วัน ต้องเป็นตัวเลขมากกว่า 0 (เว้นว่างถ้าไม่จำกัด)"); return;
+    }
     setAdding(true);
     try {
       let image_url: string | null = null;
@@ -393,10 +417,10 @@ export default function KitchenPage() {
         image_url = await uploadMenuImage(newImageFile);
         setImgUploading(false);
       }
-      const created = await createMenuItem({ name: newName.trim(), price: p, category: finalCat, emoji: newEmoji, ingredients: newIng.trim(), image_url });
+      const created = await createMenuItem({ name: newName.trim(), price: p, category: finalCat, emoji: newEmoji, ingredients: newIng.trim(), image_url, daily_limit: dailyLimit });
       setItems(prev => [...prev, created as MenuItem]);
       setShowAdd(false);
-      setNewName(""); setNewPrice(""); setNewIng(""); setNewEmoji("🍽️");
+      setNewName(""); setNewPrice(""); setNewIng(""); setNewEmoji("🍽️"); setNewDailyLimit("");
       setNewCatCustom(false); setNewCatText(""); setNewCat("ข้าว");
       setNewImageFile(null); setNewImagePreview(null);
       showMenuToast(`เพิ่มเมนู "${created.name}" แล้ว`);
@@ -444,32 +468,36 @@ export default function KitchenPage() {
   const dateLabel = `${now.toLocaleDateString("th-TH", { weekday: "long" })}ที่ ${now.getDate()} ${now.toLocaleDateString("th-TH", { month: "short" })}`;
   const clockLabel = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
-  // ── PIN SCREEN ────────────────────────────────────────
+  // ── LOGIN SCREEN ──────────────────────────────────────
   if (!unlocked) return (
     <>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Taviraj:wght@500;600;700&family=Noto+Sans+Thai:wght@400;500;600&family=Courier+Prime:wght@400;700&display=swap');`}</style>
       <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: C.bg, fontFamily: FB, padding: 24 }}>
         <div style={{ width: 84, height: 84, borderRadius: "50%", border: `2px solid ${C.ink}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, fontWeight: 700, fontFamily: FD, marginBottom: 20, background: C.paper }}>PP</div>
         <div style={{ fontSize: 24, fontWeight: 700, color: C.ink, marginBottom: 6, fontFamily: FD }}>ครัว PETPAL</div>
-        <div style={{ fontSize: 14, color: C.inkSoft, marginBottom: 36, fontFamily: FM }}>ใส่ PIN เพื่อเข้าใช้งาน</div>
-        <div style={{ display: "flex", gap: 18, marginBottom: 36 }}>
-          {[0,1,2,3].map(i => (
-            <div key={i} style={{ width: 18, height: 18, borderRadius: "50%", background: pin.length > i ? (pinError ? C.plum : C.sage) : "transparent", border: `2px solid ${pin.length > i ? "transparent" : C.line}`, transition: "background .15s" }} />
-          ))}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, maxWidth: 300, width: "100%" }}>
-          {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((n, i) => (
-            <button key={i}
-              onClick={() => {
-                if (n === "⌫") setPin(p => p.slice(0,-1));
-                else if (n !== "") handlePin(pin + String(n));
-              }}
-              style={{ padding: "20px 0", border: `1.5px solid ${C.line}`, borderRadius: 8, background: n === "" ? "transparent" : C.paper, fontSize: 22, fontWeight: 600, cursor: n === "" ? "default" : "pointer", color: C.ink, fontFamily: FD }}>
-              {n}
-            </button>
-          ))}
-        </div>
-        {pinError && <div style={{ color: C.plum, fontSize: 14, marginTop: 18, fontWeight: 700, fontFamily: FD }}>PIN ไม่ถูกต้อง</div>}
+        <div style={{ fontSize: 14, color: C.inkSoft, marginBottom: 28, fontFamily: FM }}>เข้าสู่ระบบเพื่อใช้งาน</div>
+        <form
+          onSubmit={(e) => { e.preventDefault(); handleLogin(); }}
+          style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 300, width: "100%" }}
+        >
+          <input
+            type="email" autoComplete="username" placeholder="อีเมล" value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            style={{ padding: "14px 16px", border: `1.5px solid ${C.line}`, borderRadius: 8, fontSize: 16, fontFamily: FM, background: C.paper, color: C.ink }}
+          />
+          <input
+            type="password" autoComplete="current-password" placeholder="รหัสผ่าน" value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={{ padding: "14px 16px", border: `1.5px solid ${C.line}`, borderRadius: 8, fontSize: 16, fontFamily: FM, background: C.paper, color: C.ink }}
+          />
+          <button
+            type="submit" disabled={loggingIn || !email.trim() || !password}
+            style={{ padding: "14px 0", border: "none", borderRadius: 8, background: C.ink, color: C.paper, fontSize: 16, fontWeight: 600, fontFamily: FD, cursor: loggingIn ? "default" : "pointer", opacity: loggingIn ? 0.6 : 1 }}
+          >
+            {loggingIn ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+          </button>
+        </form>
+        {loginError && <div style={{ color: C.plum, fontSize: 14, marginTop: 18, fontWeight: 700, fontFamily: FD }}>อีเมลหรือรหัสผ่านไม่ถูกต้อง</div>}
       </div>
     </>
   );
@@ -572,7 +600,10 @@ export default function KitchenPage() {
                           <span style={stateTagStyle(o.status === "new" ? "pending" : "cooking")}>{o.status === "new" ? "รอตอบรับ" : "กำลังเตรียม"}</span>
                         </div>
                         <div style={{ padding: "10px 18px 4px" }}>
-                          <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 4 }}>👤 {o.customer_name}</div>
+                          <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                            👤 {o.customer_name}
+                            <button onClick={() => handleFlag(o.id, o.customer_name)} title="รายงานชื่อไม่เหมาะสม" style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, color: C.inkSoft, opacity: 0.6 }}>🚩</button>
+                          </div>
                           <div style={{ fontSize: 14, color: C.ink, padding: "6px 0", whiteSpace: "pre-wrap" }}>{o.items}</div>
                           {o.note && <div style={{ fontSize: 12.5, color: C.ochre, fontStyle: "italic", marginBottom: 6 }}>📝 {o.note}</div>}
                         </div>
@@ -603,7 +634,10 @@ export default function KitchenPage() {
                         <span style={stateTagStyle(tagKind)}>{tagLabel}</span>
                       </div>
                       <div style={{ padding: "10px 18px 4px" }}>
-                        <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 2 }}>👤 {o.customer_name}</div>
+                        <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
+                          👤 {o.customer_name}
+                          <button onClick={() => handleFlag(o.id, o.customer_name)} title="รายงานชื่อไม่เหมาะสม" style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, color: C.inkSoft, opacity: 0.6 }}>🚩</button>
+                        </div>
                         {o.items.map((it, i) => {
                           const key = `${o.id}_${i}`;
                           const mark = itemMarks[key];
@@ -682,7 +716,10 @@ export default function KitchenPage() {
                         </div>
                       )}
                     </div>
-                    <input value={newIng} onChange={e => setNewIng(e.target.value)} placeholder="วัตถุดิบ (ถ้ามี)" style={{ background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <input value={newIng} onChange={e => setNewIng(e.target.value)} placeholder="วัตถุดิบ (ถ้ามี)" style={{ flex: 1, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
+                      <input type="number" min={1} value={newDailyLimit} onChange={e => setNewDailyLimit(e.target.value)} placeholder="จำกัด/วัน (ว่าง=ไม่จำกัด)" style={{ width: 170, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
+                    </div>
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                       <button onClick={() => setShowAdd(false)} style={{ background: "transparent", border: `1.5px solid ${C.inkSoft}`, color: C.inkSoft, borderRadius: 3, padding: "9px 18px", cursor: "pointer", fontFamily: FD }}>ยกเลิก</button>
                       <button onClick={handleAddMenu} disabled={adding} style={{ background: C.sage, color: C.paper, border: "none", borderRadius: 3, padding: "9px 18px", fontWeight: 700, cursor: "pointer", fontFamily: FD }}>{adding ? (imgUploading ? "กำลังอัปโหลดรูป..." : "กำลังเพิ่ม...") : "บันทึก"}</button>
@@ -725,7 +762,15 @@ export default function KitchenPage() {
                           <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="ชื่อเมนู" style={{ flex: 1, minWidth: 140, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
                           <input type="number" value={editPrice} onChange={e => setEditPrice(e.target.value)} placeholder="ราคา" style={{ width: 100, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
                         </div>
-                        <input value={editIng} onChange={e => setEditIng(e.target.value)} placeholder="วัตถุดิบ" style={{ background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
+                        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                          <input value={editIng} onChange={e => setEditIng(e.target.value)} placeholder="วัตถุดิบ" style={{ flex: 1, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
+                          <input type="number" min={1} value={editDailyLimit} onChange={e => setEditDailyLimit(e.target.value)} placeholder="จำกัด/วัน (ว่าง=ไม่จำกัด)" style={{ width: 170, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
+                        </div>
+                        {item.remaining_today !== null && item.remaining_today !== undefined && (
+                          <div style={{ fontSize: 12, color: C.inkSoft, fontFamily: FB }}>
+                            วันนี้เหลือ {item.remaining_today} / {item.daily_limit} ที่
+                          </div>
+                        )}
                         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                           <button onClick={() => setDeleteConfirm(item.id)} style={{ background: "transparent", border: `1.5px solid ${C.plum}`, color: C.plum, borderRadius: 3, padding: "9px 14px", cursor: "pointer", fontFamily: FD }}>ลบ</button>
                           <button onClick={() => setEditing(null)} style={{ background: "transparent", border: `1.5px solid ${C.inkSoft}`, color: C.inkSoft, borderRadius: 3, padding: "9px 18px", cursor: "pointer", fontFamily: FD }}>ยกเลิก</button>

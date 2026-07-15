@@ -2,12 +2,6 @@
 
 export type OrderStatus = "new" | "cooking" | "done" | "cancelled";
 
-export interface Department {
-  id: string;
-  name: string;
-  active: boolean;
-}
-
 export interface MenuItem {
   id: number;
   name: string;
@@ -18,6 +12,8 @@ export interface MenuItem {
   sort_order: number;
   ingredients?: string;
   image_url?: string | null;
+  daily_limit?: number | null;      // null = ไม่จำกัด
+  remaining_today?: number | null;  // null = ไม่จำกัด, มาจาก view menu_items_with_remaining
 }
 
 export interface OrderItem {
@@ -29,7 +25,6 @@ export interface OrderItem {
 
 export interface Order {
   id: number;
-  dept_id: string;
   customer_name: string;
   items: OrderItem[];
   note: string | null;
@@ -38,7 +33,7 @@ export interface Order {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
-  departments?: Department;
+  access_token: string;
 }
 
 export interface Announcement {

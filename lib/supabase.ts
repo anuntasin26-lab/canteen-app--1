@@ -4,20 +4,50 @@ import { createClient } from "@supabase/supabase-js";
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-export const supabase = createClient(url, key);
+// persistSession: false — ไม่เก็บ session ลง localStorage เลย
+// ทำให้ทุกครั้งที่รีเฟรช/เปิดหน้าใหม่ ต้อง login ใหม่เสมอ (ตามที่ตกลงไว้)
+export const supabase = createClient(url, key, {
+  auth: { persistSession: false },
+});
 
-// ── Departments ───────────────────────────────────────────
-export async function getDepartmentById(id: string) {
-  const { data, error } = await supabase
-    .from("departments").select("*").eq("id", id).single();
+// ── Staff Auth (ใช้ร่วมกันทั้ง /kitchen และ /admin) ─────────
+/** Login ด้วย email/password — คืน error message ภาษาไทยถ้าล้มเหลว */
+export async function signInStaff(email: string, password: string) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
   return data;
 }
 
-/** ดึงแผนกทั้งหมด — สำหรับ dropdown เลือกแผนกในหน้าสั่งอาหาร */
-export async function getAllDepartments() {
-  const { data, error } = await supabase
-    .from("departments").select("*").eq("active", true).order("name");
+export async function signOutStaff() {
+  await supabase.auth.signOut();
+}
+
+export async function getStaffSession() {
+  const { data } = await supabase.auth.getSession();
+  return data.session;
+}
+
+/** ลูกค้าแก้ชื่อของออเดอร์ตัวเอง — ต้องมี access_token ที่ถูกต้อง (เช็คฝั่ง DB ผ่าน RPC) */
+export async function renameOwnOrder(orderId: number, token: string, newName: string) {
+  const { data, error } = await supabase.rpc("rename_own_order", {
+    p_order_id: orderId,
+    p_access_token: token,
+    p_new_name: newName,
+  });
+  if (error) {
+    const e: any = new Error(error.message);
+    e.code = error.message?.split(":")[0];
+    throw e;
+  }
+  return data;
+}
+
+/** ลูกค้ายกเลิกออเดอร์ตัวเอง — ต้องมี access_token ที่ถูกต้อง (เช็คฝั่ง DB ผ่าน RPC) */
+export async function cancelOwnOrder(orderId: number, token: string) {
+  const { data, error } = await supabase.rpc("cancel_own_order", {
+    p_order_id: orderId,
+    p_access_token: token,
+  });
   if (error) throw error;
   return data;
 }
@@ -25,7 +55,7 @@ export async function getAllDepartments() {
 // ── Menu Items ────────────────────────────────────────────
 export async function getMenuItems() {
   const { data, error } = await supabase
-    .from("menu_items").select("*").order("sort_order");
+    .from("menu_items_with_remaining").select("*").order("sort_order");
   if (error) throw error;
   return data;
 }
@@ -37,12 +67,13 @@ export async function toggleMenuItem(id: number, available: boolean) {
   if (error) throw error;
 }
 
-/** ครัวแก้ไขเมนู: ชื่อ, ราคา, วัตถุดิบ — แล้วบันทึก log อัตโนมัติ */
+/** ครัวแก้ไขเมนู: ชื่อ, ราคา, วัตถุดิบ, โควตา/วัน — แล้วบันทึก log อัตโนมัติ */
 export async function updateMenuItem(id: number, fields: {
   name?: string;
   price?: number;
   ingredients?: string;
   image_url?: string | null;
+  daily_limit?: number | null;
 }) {
   const { error } = await supabase
     .from("menu_items").update(fields).eq("id", id);
@@ -68,6 +99,7 @@ export async function createMenuItem(fields: {
   emoji?: string;
   ingredients?: string;
   image_url?: string | null;
+  daily_limit?: number | null;
 }) {
   const { data, error } = await supabase
     .from("menu_items")
@@ -176,8 +208,8 @@ export async function getTodayOrders() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const { data, error } = await supabase
-    .from("orders")
-    .select("*, departments(id, name)")
+    .from("orders_with_items")
+    .select("*")
     .gte("created_at", today.toISOString())
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -189,66 +221,59 @@ export async function getOrderHistory(days = 7) {
   from.setDate(from.getDate() - days);
   from.setHours(0, 0, 0, 0);
   const { data, error } = await supabase
-    .from("orders")
-    .select("*, departments(id, name)")
+    .from("orders_with_items")
+    .select("*")
     .gte("created_at", from.toISOString())
     .order("created_at", { ascending: false });
   if (error) throw error;
   return data;
 }
 
+/**
+ * สร้างออเดอร์ใหม่ผ่าน RPC เดียวแบบ atomic — ราคาคำนวณจาก menu_items
+ * จริงฝั่ง server เสมอ (ไม่เชื่อราคาที่ client ส่งมา) กันการปลอมราคา
+ */
 export async function createOrder(payload: {
-  dept_id: string;
   customer_name: string;
-  items: { id: number; name: string; qty: number; price: number }[];
+  items: { id: number; qty: number }[];
   note?: string;
-  total: number;
 }) {
-  const { data, error } = await supabase
-    .from("orders").insert(payload).select().single();
-  if (error) throw error;
+  const { data, error } = await supabase.rpc("create_order", {
+    p_customer_name: payload.customer_name,
+    p_items: payload.items,
+    p_note: payload.note ?? null,
+  });
+  if (error) {
+    const e: any = new Error(error.message);
+    e.code = error.message?.split(":")[0];
+    throw e;
+  }
   return data;
 }
 
 /**
- * เพิ่มรายการเข้าออร์เดอร์เดิมที่ยังเป็น "new" (ยังไม่เริ่มทำ)
- * — merge items ที่ id ซ้ำกันให้รวม qty, คำนวณ total ใหม่ทั้งหมด
+ * เพิ่มรายการเข้าออร์เดอร์เดิมที่ยังเป็น "new" (ยังไม่เริ่มทำ) ผ่าน RPC
+ * แบบ atomic เดียวกัน — ตรวจ access_token + สถานะ + คำนวณราคาใหม่ฝั่ง server
  * ใช้แทน createOrder เมื่อกด "สั่งอาหารเพิ่ม" ระหว่างที่ออร์เดอร์เดิมยังรอ
  */
 export async function addItemsToOrder(
   orderId: number,
-  newItems: { id: number; name: string; qty: number; price: number }[],
+  token: string,
+  newItems: { id: number; qty: number }[],
   extraNote?: string
 ) {
-  // ดึงออร์เดอร์เดิมก่อน เพื่อตรวจสถานะและรายการปัจจุบัน
-  const { data: existing, error: fetchErr } = await supabase
-    .from("orders").select("*").eq("id", orderId).single();
-  if (fetchErr) throw fetchErr;
-  if (!existing) throw new Error("ไม่พบออร์เดอร์เดิม");
-  if (existing.status !== "new") {
-    // ออร์เดอร์เดิมเริ่มทำแล้ว ห้ามแก้ของเดิม — โยน error ให้ฝั่ง UI ไป createOrder แทน
-    const e: any = new Error("ORDER_ALREADY_STARTED");
-    e.code = "ORDER_ALREADY_STARTED";
+  const { data, error } = await supabase.rpc("add_items_to_order", {
+    p_order_id: orderId,
+    p_access_token: token,
+    p_items: newItems,
+    p_extra_note: extraNote ?? null,
+  });
+  if (error) {
+    // แปลง error message จาก Postgres ('ORDER_ALREADY_STARTED' ฯลฯ) ให้ตรวจสอบง่ายฝั่ง UI
+    const e: any = new Error(error.message);
+    e.code = error.message?.split(":")[0];
     throw e;
   }
-
-  // merge รายการ: ถ้า menu id ซ้ำ ให้รวม qty
-  const merged = [...(existing.items as any[])];
-  for (const ni of newItems) {
-    const found = merged.find(m => m.id === ni.id);
-    if (found) found.qty += ni.qty;
-    else merged.push({ ...ni });
-  }
-  const newTotal = merged.reduce((s, it) => s + it.price * it.qty, 0);
-  const mergedNote = [existing.note, extraNote].filter(Boolean).join(" / ") || null;
-
-  const { data, error } = await supabase
-    .from("orders")
-    .update({ items: merged, total: newTotal, note: mergedNote })
-    .eq("id", orderId)
-    .select()
-    .single();
-  if (error) throw error;
   return data;
 }
 
@@ -302,7 +327,6 @@ export function subscribeToMenuItems(callback: (payload: any) => void) {
 
 export interface CustomOrder {
   id: number;
-  dept_id: string;
   customer_name: string;
   items: string;       // free text เช่น "ข้าวผัดกระเพราหมูสับ x2"
   note: string | null;
@@ -312,19 +336,22 @@ export interface CustomOrder {
   completed_at: string | null;
 }
 
-/** พนักงานสั่งอาหารตามสั่ง */
+/** ลูกค้าสั่งอาหารตามสั่ง — ผ่าน RPC (เช็คคำหยาบฝั่ง server) */
 export async function createCustomOrder(payload: {
-  dept_id: string;
   customer_name: string;
   items: string;
   note?: string;
 }) {
-  const { data, error } = await supabase
-    .from("custom_orders")
-    .insert(payload)
-    .select()
-    .single();
-  if (error) throw error;
+  const { data, error } = await supabase.rpc("create_custom_order", {
+    p_customer_name: payload.customer_name,
+    p_items: payload.items,
+    p_note: payload.note ?? null,
+  });
+  if (error) {
+    const e: any = new Error(error.message);
+    e.code = error.message?.split(":")[0];
+    throw e;
+  }
   return data as CustomOrder;
 }
 
@@ -384,4 +411,60 @@ export function subscribeToCustomOrders(
       })
     )
     .subscribe();
+}
+
+// ── Blacklist คำหยาบ (จัดการจากหน้า /admin) ──────────────────
+export async function getBlacklistWords() {
+  const { data, error } = await supabase
+    .from("blacklist_words").select("*").order("created_at", { ascending: false });
+  if (error) throw error;
+  return data as { id: number; word: string; created_at: string }[];
+}
+
+export async function addBlacklistWord(word: string) {
+  const { data, error } = await supabase
+    .from("blacklist_words").insert({ word }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function removeBlacklistWord(id: number) {
+  const { error } = await supabase.from("blacklist_words").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ── Flagging (ครัวรายงานชื่อที่หลุดผ่านมาได้) ─────────────────
+/** ครัวกด flag ชื่อบนตั๋วออเดอร์ — เข้าคิวให้ /admin ตรวจสอบทีหลัง */
+export async function flagOrderName(orderId: number, text: string) {
+  const { data: session } = await supabase.auth.getUser();
+  const { error } = await supabase.from("flagged_names").insert({
+    order_id: orderId,
+    flagged_text: text,
+    flagged_by: session.user?.id ?? null,
+  });
+  if (error) throw error;
+}
+
+export async function getFlaggedNames() {
+  const { data, error } = await supabase
+    .from("flagged_names").select("*").eq("reviewed", false).order("created_at", { ascending: false });
+  if (error) throw error;
+  return data as { id: number; order_id: number | null; custom_order_id: number | null; flagged_text: string; created_at: string; reviewed: boolean }[];
+}
+
+/** Admin ตรวจคิว flag: เพิ่มเข้า blacklist แล้วปิดเรื่อง หรือแค่ปิดเรื่องเฉย ๆ (ไม่ใช่คำหยาบจริง) */
+export async function resolveFlaggedName(id: number, addToBlacklist: boolean, word?: string) {
+  if (addToBlacklist && word) {
+    await addBlacklistWord(word);
+  }
+  const { error } = await supabase.from("flagged_names").update({ reviewed: true }).eq("id", id);
+  if (error) throw error;
+}
+
+// ── Audit log (ดูได้จาก /admin) ──────────────────────────
+export async function getAuditLog(limit = 50) {
+  const { data, error } = await supabase
+    .from("audit_log").select("*").order("created_at", { ascending: false }).limit(limit);
+  if (error) throw error;
+  return data as { id: number; actor_id: string | null; action: string; target_type: string; target_id: number | null; detail: any; created_at: string }[];
 }

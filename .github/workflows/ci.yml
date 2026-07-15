@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests (vitest)
+        run: npm run test
+
+      # E2E (Playwright) ต้องมี Supabase project จริงพร้อมข้อมูล seed จึงไม่รันใน CI
+      # อัตโนมัติตอนนี้ — รันเองก่อน merge ด้วย `npm run test:e2e` จนกว่าจะตั้ง
+      # Supabase project สำหรับ CI โดยเฉพาะ (ดู README/roadmap)
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+      - run: npm ci
+      - name: npm audit (high severity ขึ้นไป)
+        run: npm audit --audit-level=high
+        continue-on-error: true # แจ้งเตือนไว้ก่อน ไม่บล็อก PR จนกว่าจะทบทวนนโยบายทีมเอง
