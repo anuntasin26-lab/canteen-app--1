@@ -30,7 +30,7 @@ export function OrdersPanel({
     return <div style={{ color: C.inkSoft, padding: 14, fontStyle: "italic" }}>ยังไม่มีออเดอร์เข้ามาตอนนี้</div>;
   }
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px,1fr))", gap: 22 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px,1fr))", gap: 18 }}>
       {tickets.map(t => t.kind === "custom" ? (
         <CustomOrderTicket
           key={`c${t.o.id}`}

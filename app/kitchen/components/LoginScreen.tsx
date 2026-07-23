@@ -26,16 +26,16 @@ export function LoginScreen({
           <input
             type="email" autoComplete="username" placeholder="อีเมล" value={email}
             onChange={(e) => setEmail(e.target.value)}
-            style={{ padding: "14px 16px", border: `1.5px solid ${C.line}`, borderRadius: 8, fontSize: 16, fontFamily: FM, background: C.paper, color: C.ink }}
+            style={{ padding: "16px 18px", border: `1.5px solid ${C.line}`, borderRadius: 10, fontSize: 16, fontFamily: FM, background: C.paper2, color: C.ink }}
           />
           <input
             type="password" autoComplete="current-password" placeholder="รหัสผ่าน" value={password}
             onChange={(e) => setPassword(e.target.value)}
-            style={{ padding: "14px 16px", border: `1.5px solid ${C.line}`, borderRadius: 8, fontSize: 16, fontFamily: FM, background: C.paper, color: C.ink }}
+            style={{ padding: "16px 18px", border: `1.5px solid ${C.line}`, borderRadius: 10, fontSize: 16, fontFamily: FM, background: C.paper2, color: C.ink }}
           />
           <button
             type="submit" disabled={loggingIn || !email.trim() || !password}
-            style={{ padding: "14px 0", border: "none", borderRadius: 8, background: C.ink, color: C.paper, fontSize: 16, fontWeight: 600, fontFamily: FD, cursor: loggingIn ? "default" : "pointer", opacity: loggingIn ? 0.6 : 1 }}
+            style={{ padding: "16px 0", border: "none", borderRadius: 10, background: C.ochre, color: C.paper, fontSize: 17, fontWeight: 600, fontFamily: FD, cursor: loggingIn ? "default" : "pointer", opacity: loggingIn ? 0.6 : 1 }}
           >
             {loggingIn ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
           </button>

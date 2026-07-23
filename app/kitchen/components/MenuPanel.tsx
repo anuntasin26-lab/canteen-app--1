@@ -73,16 +73,16 @@ export function MenuPanel({
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {CATS.map(c => (
             <button key={c} onClick={() => setMenuCat(c)}
-              style={{ padding: "6px 15px", borderRadius: 3, border: `1.5px solid ${C.ink}`, background: menuCat === c ? C.ink : "transparent", fontSize: 13, color: menuCat === c ? C.paper : C.ink, cursor: "pointer", fontWeight: 500, fontFamily: FD }}>
+              style={{ padding: "10px 18px", borderRadius: 20, border: `1.5px solid ${menuCat === c ? C.ink : C.line}`, background: menuCat === c ? C.ink : "transparent", fontSize: 14, color: menuCat === c ? C.paper : C.ink, cursor: "pointer", fontWeight: 500, fontFamily: FD }}>
               {c}
             </button>
           ))}
         </div>
-        <button onClick={() => setShowAdd(v => !v)} style={{ background: C.ink, color: C.paper, border: "none", borderRadius: 3, padding: "10px 18px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD }}>+ เพิ่มเมนู</button>
+        <button onClick={() => setShowAdd(v => !v)} style={{ background: C.ochre, color: C.paper, border: "none", borderRadius: 8, padding: "12px 20px", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: FD }}>+ เพิ่มเมนู</button>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px,1fr))", gap: 16 }}>
-        <div onClick={() => setShowAdd(v => !v)} style={{ border: `1.5px dashed ${C.inkSoft}`, borderRadius: 3, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 175, cursor: "pointer", color: C.inkSoft, flexDirection: "column", gap: 6, fontWeight: 600, fontSize: 13, fontFamily: FD }}>
+        <div onClick={() => setShowAdd(v => !v)} style={{ border: `1.5px dashed ${C.line}`, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 175, cursor: "pointer", color: C.inkSoft, flexDirection: "column", gap: 6, fontWeight: 600, fontSize: 14, fontFamily: FD }}>
           <span style={{ fontSize: 22 }}>+</span><div>เพิ่มเมนูใหม่</div>
         </div>
 
