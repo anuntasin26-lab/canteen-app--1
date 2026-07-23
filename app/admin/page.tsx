@@ -31,15 +31,19 @@ export default function AdminPage() {
   const [auditLog, setAuditLog] = useState<{ id: number; actor_id: string | null; action: string; target_type: string; target_id: number | null; detail: any; created_at: string }[]>([]);
   const [loadingAudit, setLoadingAudit] = useState(false);
 
+  // ตั้งค่าโหลดใหม่ก่อนดึงข้อมูล — เรียกจาก event handler (คลิกแท็บ/login สำเร็จ)
+  // แทนที่จะเรียก setState ตรง ๆ ในตัว effect (react-hooks/set-state-in-effect)
+  const setLoadingForTab = (t: "dashboard" | "settings") => {
+    if (t === "dashboard") setLoadingAudit(true); else setLoadingSettings(true);
+  };
+
   useEffect(() => {
     if (!unlocked || tab !== "dashboard") return;
-    setLoadingAudit(true);
     getAuditLog(50).then(setAuditLog).finally(() => setLoadingAudit(false));
   }, [unlocked, tab]);
 
   useEffect(() => {
     if (!unlocked || tab !== "settings") return;
-    setLoadingSettings(true);
     Promise.all([getBlacklistWords(), getFlaggedNames()])
       .then(([b, f]) => { setBlacklist(b); setFlagged(f); })
       .finally(() => setLoadingSettings(false));
@@ -82,6 +86,7 @@ export default function AdminPage() {
     try {
       await signInStaff(email.trim(), password);
       setUnlocked(true);
+      setLoadingForTab(tab);
     } catch {
       setLoginError(true);
     } finally {
@@ -134,7 +139,7 @@ export default function AdminPage() {
 
       <div style={{ display: "flex", gap: 6, padding: "12px 16px" }}>
         {([["dashboard", "แดชบอร์ด"], ["settings", "ตั้งค่า"]] as const).map(([key, label]) => (
-          <button key={key} onClick={() => setTab(key)}
+          <button key={key} onClick={() => { if (tab !== key) setLoadingForTab(key); setTab(key); }}
             style={{ flex: 1, padding: "8px 0", border: `1px solid ${tab === key ? C.green : C.border}`, borderRadius: 10, background: tab === key ? C.greenL : "#fff", color: tab === key ? C.green : C.muted, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
             {label}
           </button>
