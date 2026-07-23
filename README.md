@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# โรงอาหาร (Canteen App)
 
-## Getting Started
+ระบบสั่งอาหารโรงอาหาร สร้างด้วย [Next.js](https://nextjs.org) และ [Supabase](https://supabase.com)
 
-First, run the development server:
+## เริ่มต้นใช้งาน
+
+### 1. ติดตั้ง dependencies
+
+```bash
+npm install
+```
+
+### 2. ตั้งค่า environment variables
+
+คัดลอก `.env.example` เป็น `.env.local` แล้วกรอกค่าให้ครบ:
+
+```bash
+cp .env.example .env.local
+```
+
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — จาก Supabase Dashboard → Settings → API
+- `NEXT_PUBLIC_KITCHEN_PIN` — PIN เข้าหน้าครัว/เมนูย้อนหลัง (ชั่วคราว จะย้ายไปตรวจสอบฝั่ง server ใน Phase 1)
+
+### 3. รัน development server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+เปิด [http://localhost:3000](http://localhost:3000) เพื่อดูผลลัพธ์
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## คำสั่งที่ใช้บ่อย
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| คำสั่ง | ใช้ทำอะไร |
+| --- | --- |
+| `npm run dev` | รัน dev server |
+| `npm run build` | build สำหรับ production |
+| `npm run start` | รัน production server |
+| `npm run lint` | ตรวจสอบ code style ด้วย ESLint |
+| `npm test` | รัน unit test ด้วย [Vitest](https://vitest.dev) |
+| `npm run test:e2e` | รัน end-to-end test ด้วย [Playwright](https://playwright.dev) |
 
-## Learn More
+## โครงสร้างโปรเจกต์
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `app/` — หน้าเว็บและ route ต่าง ๆ (App Router)
+  - `app/order/` — flow การสั่งอาหารของลูกค้า
+  - `app/kitchen/` — หน้าจัดการออเดอร์ฝั่งครัว
+  - `app/admin/` — หน้าจัดการเมนู/ระบบฝั่งแอดมิน
+  - `app/menu-history/` — ประวัติเมนูย้อนหลัง
+- `lib/` — ฟังก์ชันช่วยเหลือแบบ pure function (เช่น `cart-utils.ts`) และการเชื่อมต่อ Supabase
+- `supabase/` — migration และ test ฝั่งฐานข้อมูล
+- `e2e/` — end-to-end test ด้วย Playwright
