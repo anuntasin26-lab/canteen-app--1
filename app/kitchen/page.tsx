@@ -454,7 +454,7 @@ export default function KitchenPage() {
         <KitchenTabs tab={tab} setTab={setTab} pendingCount={pendingCount} />
 
         {/* Panel */}
-        <section style={{ background: C.paper, border: `2px solid ${C.ink}`, borderRadius: "0 8px 8px 8px", margin: "0 26px", padding: 24, minHeight: 200 }}>
+        <section style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 12, margin: "16px 26px 0", padding: 24, minHeight: 200 }}>
 
           {tab === "order" && (
             <OrdersPanel
