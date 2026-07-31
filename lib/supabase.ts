@@ -27,6 +27,20 @@ export async function getStaffSession() {
   return data.session;
 }
 
+/** ส่งอีเมลรีเซ็ตรหัสผ่าน — ลิงก์ในอีเมลจะพาไปหน้า /reset-password */
+export async function requestPasswordReset(email: string) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/reset-password`,
+  });
+  if (error) throw error;
+}
+
+/** ตั้งรหัสผ่านใหม่ — ใช้ในหน้า /reset-password ขณะมี recovery session ชั่วคราวจากลิงก์อีเมล */
+export async function updateStaffPassword(newPassword: string) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+}
+
 /** ลูกค้าแก้ชื่อของออเดอร์ตัวเอง — ต้องมี access_token ที่ถูกต้อง (เช็คฝั่ง DB ผ่าน RPC) */
 export async function renameOwnOrder(orderId: number, token: string, newName: string) {
   const { data, error } = await supabase.rpc("rename_own_order", {

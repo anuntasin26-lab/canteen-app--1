@@ -14,12 +14,13 @@ import {
   getTodayCustomOrders, updateCustomOrderStatus, cancelCustomOrder,
   subscribeToCustomOrders,
   uploadMenuImage, deleteMenuImage,
-  signInStaff, signOutStaff,
   flagOrderName,
 } from "@/lib/supabase";
 import type { CustomOrder } from "@/lib/supabase";
 import type { Order } from "@/types";
 import type { MenuItem } from "@/types";
+import { useStaffAuth } from "@/lib/useStaffAuth";
+import { StaffLoginScreen, type StaffLoginTheme } from "@/components/StaffLoginScreen";
 
 // ── Helpers ───────────────────────────────────────────────
 const fmtElapsed = (s: string, ref?: string | null) => {
@@ -55,6 +56,17 @@ const FB = "'Noto Sans Thai', sans-serif";
 const FM = "'Courier Prime', monospace";
 const DEFAULT_CATS = ["ข้าว", "ก๋วยเตี๋ยว", "เครื่องดื่ม"];
 
+const KITCHEN_FONTS_HREF =
+  "https://fonts.googleapis.com/css2?family=Taviraj:wght@500;600;700&family=Noto+Sans+Thai:wght@400;500;600&family=Courier+Prime:wght@400;700&display=swap";
+
+const kitchenLoginTheme: StaffLoginTheme = {
+  ink: C.ink, inkSoft: C.inkSoft, panel: C.paper, accent: C.sage, danger: C.plum,
+  border: C.line, bg: C.bg,
+  fontHeading: FD, fontBody: FB, fontMono: FM, radius: 16,
+  title: "ครัว PETPAL", subtitle: "เข้าสู่ระบบเพื่อใช้งาน", brandGlyph: "PP",
+  googleFontsHref: KITCHEN_FONTS_HREF,
+};
+
 // ── Icons (เล็ก ๆ ใช้ซ้ำ) ───────────────────────────────────
 const IconCheck = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} style={{ width: 12, height: 12 }}><path d="M4 12l5 5L20 6" /></svg>
@@ -69,13 +81,169 @@ const IconLock = () => (
   <svg fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" style={{ width: 16, height: 16 }}><rect x="4" y="10" width="16" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
 );
 
-// ── "ตั๋ว" การ์ดออเดอร์ — เทป+ขอบฉีก ─────────────────────────
+// ── "ตั๋ว" การ์ดออเดอร์ — เทป+ขอบฉีก (ยกตัวเบา ๆ เมื่อ hover) ──
 function TicketShell({ children }: { children: React.ReactNode }) {
+  const [hover, setHover] = useState(false);
   return (
-    <div style={{ background: C.paper2, border: `1px solid ${C.line}`, borderRadius: 2, position: "relative", paddingTop: 14, marginBottom: 8 }}>
+    <div
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        background: C.paper2, border: `1px solid ${C.line}`, borderRadius: 2, position: "relative", paddingTop: 14, marginBottom: 8,
+        animation: "staffViewIn .3s ease",
+        boxShadow: hover ? "0 6px 16px rgba(0,0,0,0.10)" : "0 1px 2px rgba(0,0,0,0.04)",
+        transform: hover ? "translateY(-2px)" : "translateY(0)",
+        transition: "box-shadow .15s ease, transform .15s ease",
+      }}>
       <div style={{ position: "absolute", top: -9, left: "50%", transform: "translateX(-50%)", width: 46, height: 16, background: "#B7BDBE", borderRadius: 3, boxShadow: "0 2px 3px rgba(0,0,0,0.2)" }} />
       {children}
       <div style={{ position: "absolute", bottom: -6, left: 0, right: 0, height: 12, backgroundImage: `linear-gradient(135deg, transparent 50%, ${C.bg} 50%)`, backgroundSize: "10px 12px", backgroundRepeat: "repeat-x" }} />
+    </div>
+  );
+}
+
+// ── ปุ่มล็อก/ออกจากระบบ — hover feedback ────────────────────
+function LockButton({ onClick }: { onClick: () => void }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button onClick={onClick}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        width: 38, height: 38, borderRadius: "50%", border: `1.5px solid ${C.ink}`,
+        background: hover ? C.ink : "transparent", color: hover ? C.paper : C.ink,
+        display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+        transition: "background-color .15s ease, color .15s ease",
+      }}>
+      <IconLock />
+    </button>
+  );
+}
+
+// ── จุดสถานะ "เปิดรับออเดอร์" — pulse เบา ๆ ให้รู้สึกว่ายังทำงานอยู่ ──
+function LiveDot() {
+  return (
+    <span style={{ width: 7, height: 7, borderRadius: "50%", background: C.sage, animation: "staffPulse 2s ease-in-out infinite" }} />
+  );
+}
+
+// ── แท็บโฟลเดอร์ — hover + transition, เลขแจ้งเตือน pop เมื่อเปลี่ยนค่า ──
+function FolderTab({ active, onClick, children, count }: { active: boolean; onClick: () => void; children: React.ReactNode; count: number }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button onClick={onClick}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        background: active ? C.paper : hover ? C.paper : C.paper2, border: `2px solid ${C.ink}`,
+        borderBottom: active ? `2px solid ${C.paper}` : `2px solid ${C.ink}`,
+        padding: active ? "10px 24px 14px" : "10px 24px 12px", borderRadius: "8px 8px 0 0", cursor: "pointer",
+        fontFamily: FD, fontWeight: 600, fontSize: 15, color: active ? C.ink : C.inkSoft,
+        position: "relative", top: active ? 0 : 2, marginBottom: -2,
+        transition: "background-color .15s ease, color .15s ease",
+      }}>
+      {children}
+      {count > 0 && <span key={count} style={{ background: C.plum, color: C.paper, fontFamily: FM, fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 999, marginLeft: 6, display: "inline-block", animation: "staffPop .3s ease" }}>{count}</span>}
+    </button>
+  );
+}
+
+// ── การ์ดยกตัวเบา ๆ เมื่อ hover (เมนู/ประวัติ) ───────────────
+function HoverPanel({ children, style, opacity = 1 }: { children: React.ReactNode; style?: React.CSSProperties; opacity?: number }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        transition: "box-shadow .15s ease, transform .15s ease",
+        boxShadow: hover ? "0 6px 16px rgba(0,0,0,0.10)" : "0 1px 2px rgba(0,0,0,0.04)",
+        transform: hover ? "translateY(-2px)" : "translateY(0)",
+        opacity,
+        ...style,
+      }}>
+      {children}
+    </div>
+  );
+}
+
+// ── สถานะว่าง — ไอคอน + หัวข้อ + คำอธิบาย ───────────────────
+function EmptyState({ icon, title }: { icon: string; title: string }) {
+  return (
+    <div style={{ textAlign: "center", padding: "48px 16px", color: C.inkSoft }}>
+      <div style={{ fontSize: 30, marginBottom: 10 }}>{icon}</div>
+      <div style={{ fontSize: 14, fontFamily: FB }}>{title}</div>
+    </div>
+  );
+}
+
+// ── โครง loading แบบ skeleton pulse ────────────────────────
+function SkeletonRows({ count = 3, height = 100 }: { count?: number; height?: number }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px,1fr))", gap: 16 }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} style={{
+          height, borderRadius: 3, background: C.line, opacity: 0.4,
+          animation: "staffSkeleton 1.4s ease-in-out infinite", animationDelay: `${i * 0.12}s`,
+        }} />
+      ))}
+    </div>
+  );
+}
+
+// ── ปุ่มกรอง (หมวดหมู่/ช่วงวัน) — hover + transition ────────
+function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button onClick={onClick}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        padding: "6px 15px", borderRadius: 3, border: `1.5px solid ${C.ink}`,
+        background: active ? C.ink : hover ? C.paper2 : "transparent",
+        fontSize: 13, color: active ? C.paper : C.ink, cursor: "pointer", fontWeight: 500, fontFamily: FD,
+        transition: "background-color .15s ease",
+      }}>
+      {children}
+    </button>
+  );
+}
+
+// ── ปุ่มแอ็กชันทั่วไป — hover/active feedback ผ่านธีมสีของครัว ──
+function ActionButton({
+  onClick, disabled, variant = "primary", flex, children,
+}: {
+  onClick?: () => void; disabled?: boolean;
+  variant?: "primary" | "sage" | "plum" | "plumSolid" | "ghost";
+  flex?: boolean; children: React.ReactNode;
+}) {
+  const [hover, setHover] = useState(false);
+  const styles: Record<string, React.CSSProperties> = {
+    primary: { background: hover && !disabled ? "#1A1917" : C.ink, color: C.paper, border: "none" },
+    sage: { background: hover && !disabled ? "#4F6C53" : C.sage, color: C.paper, border: `1.5px solid ${C.sage}` },
+    plum: { background: hover && !disabled ? C.plumBg : "transparent", color: C.plum, border: `1.5px solid ${C.plum}` },
+    plumSolid: { background: hover && !disabled ? "#732C39" : C.plum, color: C.paper, border: "none" },
+    ghost: { background: hover && !disabled ? C.paper2 : "transparent", color: C.inkSoft, border: `1.5px solid ${C.inkSoft}` },
+  };
+  return (
+    <button onClick={onClick} disabled={disabled}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        flex: flex ? 1 : undefined, borderRadius: 3, padding: "9px 18px", fontWeight: 700, fontSize: 13,
+        cursor: disabled ? "not-allowed" : "pointer", fontFamily: FD, opacity: disabled ? 0.55 : 1,
+        transition: "background-color .15s ease, transform .1s ease", transform: hover && !disabled ? "scale(0.98)" : "scale(1)",
+        ...styles[variant],
+      }}>
+      {children}
+    </button>
+  );
+}
+
+// ── แถวประวัติ — ไฮไลต์พื้นหลังตอน hover ────────────────────
+function HistoryRow({ children }: { children: React.ReactNode }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        display: "grid", gridTemplateColumns: "90px 90px 1fr 100px", gap: 14, alignItems: "center",
+        padding: "12px 6px", borderBottom: `1px dashed ${C.line}`, fontSize: 13.5,
+        background: hover ? C.paper2 : "transparent", transition: "background-color .15s ease",
+      }}>
+      {children}
     </div>
   );
 }
@@ -89,11 +257,7 @@ const stateTagStyle = (kind: "pending" | "cooking" | "attn") => ({
 // ─────────────────────────────────────────────────────────
 export default function KitchenPage() {
   // ── Auth ──────────────────────────────────────────────
-  const [email,      setEmail]      = useState("");
-  const [password,   setPassword]   = useState("");
-  const [unlocked,   setUnlocked]   = useState(false);
-  const [loginError, setLoginError] = useState(false);
-  const [loggingIn,  setLoggingIn]  = useState(false);
+  const auth = useStaffAuth();
 
   // ── Clock ─────────────────────────────────────────────
   const [now, setNow] = useState(new Date());
@@ -154,25 +318,10 @@ export default function KitchenPage() {
   const [adding,     setAdding]     = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
-  // ── Login handler (Supabase Auth) ──────────────────────
-  const handleLogin = async () => {
-    if (!email.trim() || !password) return;
-    setLoggingIn(true);
-    setLoginError(false);
-    try {
-      await signInStaff(email.trim(), password);
-      setUnlocked(true);
-    } catch {
-      setLoginError(true);
-    } finally {
-      setLoggingIn(false);
-    }
-  };
+  // ── ออกจากระบบ (ยืนยันก่อน) ─────────────────────────────
   const handleLock = async () => {
     if (!window.confirm("ออกจากระบบและกลับไปหน้า login?")) return;
-    await signOutStaff();
-    setUnlocked(false);
-    setEmail(""); setPassword("");
+    await auth.handleLogout();
   };
 
   // ── Flag ชื่อที่หลุดผ่าน blacklist มาได้ — เข้าคิว /admin ตรวจสอบ ──
@@ -205,7 +354,7 @@ export default function KitchenPage() {
 
   // ── Load orders ───────────────────────────────────────
   useEffect(() => {
-    if (!unlocked) return;
+    if (!auth.unlocked) return;
     getTodayOrders().then(d => {
       const cleared = (() => {
         try {
@@ -215,16 +364,16 @@ export default function KitchenPage() {
       })();
       setOrders((d as Order[]).filter(o => !cleared.has(o.id)));
     });
-  }, [unlocked]);
+  }, [auth.unlocked]);
 
   useEffect(() => {
-    if (!unlocked || tab !== "history") return;
+    if (!auth.unlocked || tab !== "history") return;
     getOrderHistory(hdays).then(d => setHistory(d as Order[]));
-  }, [unlocked, tab, hdays]);
+  }, [auth.unlocked, tab, hdays]);
 
   // ── Realtime orders ───────────────────────────────────
   useEffect(() => {
-    if (!unlocked) return;
+    if (!auth.unlocked) return;
     const ch = subscribeToOrders((payload) => {
       if (payload.eventType === "INSERT") {
         supabase.from("orders_with_items").select("*").eq("id", payload.new.id).single()
@@ -238,11 +387,11 @@ export default function KitchenPage() {
         setOrders(p => p.filter(o => o.id !== payload.old.id));
     });
     return () => { supabase.removeChannel(ch); };
-  }, [unlocked]);
+  }, [auth.unlocked]);
 
   // ── Load custom orders ───────────────────────────────
   useEffect(() => {
-    if (!unlocked) return;
+    if (!auth.unlocked) return;
     getTodayCustomOrders().then(d => {
       const cleared = (() => {
         try {
@@ -252,10 +401,10 @@ export default function KitchenPage() {
       })();
       setCustomOrders(d.filter(o => !cleared.has(-o.id)));
     });
-  }, [unlocked]);
+  }, [auth.unlocked]);
 
   useEffect(() => {
-    if (!unlocked) return;
+    if (!auth.unlocked) return;
     const ch = subscribeToCustomOrders((payload) => {
       if (payload.eventType === "INSERT") {
         setCustomOrders(p => [payload.new as CustomOrder, ...p]);
@@ -267,22 +416,22 @@ export default function KitchenPage() {
         setCustomOrders(p => p.filter(o => o.id !== payload.old.id));
     });
     return () => { supabase.removeChannel(ch); };
-  }, [unlocked]);
+  }, [auth.unlocked]);
 
   // ── Load menu ─────────────────────────────────────────
   useEffect(() => {
-    if (!unlocked) return;
+    if (!auth.unlocked) return;
     getMenuItems().then(d => setItems(d as MenuItem[])).finally(() => setLoadingMenu(false));
-  }, [unlocked]);
+  }, [auth.unlocked]);
 
   useEffect(() => {
-    if (!unlocked) return;
+    if (!auth.unlocked) return;
     const ch = subscribeToMenuItems((payload) => {
       if (payload.eventType === "UPDATE")
         setItems(p => p.map(m => m.id === payload.new.id ? { ...m, ...payload.new } : m));
     });
     return () => { supabase.removeChannel(ch); };
-  }, [unlocked]);
+  }, [auth.unlocked]);
 
   // ── Order handlers (ปกติ) ─────────────────────────────
   const acceptOrder = async (id: number) => {
@@ -469,53 +618,29 @@ export default function KitchenPage() {
   const clockLabel = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
   // ── LOGIN SCREEN ──────────────────────────────────────
-  if (!unlocked) return (
-    <>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Taviraj:wght@500;600;700&family=Noto+Sans+Thai:wght@400;500;600&family=Courier+Prime:wght@400;700&display=swap');`}</style>
-      <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: C.bg, fontFamily: FB, padding: 24 }}>
-        <div style={{ width: 84, height: 84, borderRadius: "50%", border: `2px solid ${C.ink}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30, fontWeight: 700, fontFamily: FD, marginBottom: 20, background: C.paper }}>PP</div>
-        <div style={{ fontSize: 24, fontWeight: 700, color: C.ink, marginBottom: 6, fontFamily: FD }}>ครัว PETPAL</div>
-        <div style={{ fontSize: 14, color: C.inkSoft, marginBottom: 28, fontFamily: FM }}>เข้าสู่ระบบเพื่อใช้งาน</div>
-        <form
-          onSubmit={(e) => { e.preventDefault(); handleLogin(); }}
-          style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 300, width: "100%" }}
-        >
-          <input
-            type="email" autoComplete="username" placeholder="อีเมล" value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={{ padding: "14px 16px", border: `1.5px solid ${C.line}`, borderRadius: 8, fontSize: 16, fontFamily: FM, background: C.paper, color: C.ink }}
-          />
-          <input
-            type="password" autoComplete="current-password" placeholder="รหัสผ่าน" value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{ padding: "14px 16px", border: `1.5px solid ${C.line}`, borderRadius: 8, fontSize: 16, fontFamily: FM, background: C.paper, color: C.ink }}
-          />
-          <button
-            type="submit" disabled={loggingIn || !email.trim() || !password}
-            style={{ padding: "14px 0", border: "none", borderRadius: 8, background: C.ink, color: C.paper, fontSize: 16, fontWeight: 600, fontFamily: FD, cursor: loggingIn ? "default" : "pointer", opacity: loggingIn ? 0.6 : 1 }}
-          >
-            {loggingIn ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
-          </button>
-        </form>
-        {loginError && <div style={{ color: C.plum, fontSize: 14, marginTop: 18, fontWeight: 700, fontFamily: FD }}>อีเมลหรือรหัสผ่านไม่ถูกต้อง</div>}
-      </div>
-    </>
-  );
+  if (!auth.unlocked) return <StaffLoginScreen auth={auth} theme={kitchenLoginTheme} />;
 
   // ── MAIN ──────────────────────────────────────────────
   return (
     <>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Taviraj:wght@500;600;700&family=Noto+Sans+Thai:wght@400;500;600&family=Courier+Prime:wght@400;700&display=swap');`}</style>
+      <style>{`
+        @import url('${KITCHEN_FONTS_HREF}');
+        @keyframes staffPulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+        @keyframes staffPop { 0% { transform: scale(1); } 50% { transform: scale(1.18); } 100% { transform: scale(1); } }
+        @keyframes staffToastIn { from { opacity: 0; transform: translate(-50%, -12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+        @keyframes staffSkeleton { 0%, 100% { opacity: .5; } 50% { opacity: .2; } }
+        @keyframes staffViewIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+      `}</style>
       <div style={{ minHeight: "100dvh", background: C.bg, fontFamily: FB, paddingBottom: 60 }}>
 
         {/* Toast ออเดอร์ใหม่ */}
         {toast && (
-          <div style={{ position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)", background: C.sage, color: C.paper, padding: "12px 28px", borderRadius: "0 0 10px 10px", fontSize: 14, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap", fontFamily: FD }}>
+          <div style={{ position: "fixed", top: 0, left: "50%", background: C.sage, color: C.paper, padding: "12px 28px", borderRadius: "0 0 10px 10px", fontSize: 14, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap", fontFamily: FD, animation: "staffToastIn .3s ease forwards" }}>
             📌 มีออเดอร์ใหม่!
           </div>
         )}
         {menuToast && (
-          <div style={{ position: "fixed", top: 0, left: "50%", transform: "translateX(-50%)", background: C.ochre, color: C.paper, padding: "12px 28px", borderRadius: "0 0 10px 10px", fontSize: 14, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap", fontFamily: FD }}>
+          <div style={{ position: "fixed", top: 0, left: "50%", background: C.ochre, color: C.paper, padding: "12px 28px", borderRadius: "0 0 10px 10px", fontSize: 14, fontWeight: 700, zIndex: 100, whiteSpace: "nowrap", fontFamily: FD, animation: "staffToastIn .3s ease forwards" }}>
             ✓ {menuToast}
           </div>
         )}
@@ -535,47 +660,36 @@ export default function KitchenPage() {
               เวลาปัจจุบัน
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6, color: C.sage, fontSize: 13, fontWeight: 600, fontFamily: FD }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: C.sage }} />เปิดรับออเดอร์
+              <LiveDot />เปิดรับออเดอร์
             </div>
-            <button onClick={handleLock} style={{ width: 38, height: 38, borderRadius: "50%", border: `1.5px solid ${C.ink}`, background: "transparent", color: C.ink, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><IconLock /></button>
+            <LockButton onClick={handleLock} />
           </div>
         </header>
 
         {/* ประกาศถึงลูกค้า */}
         <div style={{ padding: "18px 26px 0" }}>
-          {!announceEditing ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 12, background: C.sageBg, borderRadius: 4, padding: "12px 18px" }}>
-              <span style={{ fontSize: 14 }}>📌</span>
-              <span style={{ fontSize: 14, fontWeight: 500, flex: 1, fontStyle: "italic", color: C.ink }}>{announceText}</span>
-              <button onClick={() => { setAnnounceDraft(announceText); setAnnounceEditing(true); }} style={{ background: "none", border: "none", color: C.sage, fontSize: 12, cursor: "pointer", textDecoration: "underline", fontWeight: 600, fontFamily: FB }}>เขียนประกาศเอง</button>
-            </div>
-          ) : (
-            <div style={{ display: "flex", gap: 8 }}>
-              <textarea value={announceDraft} onChange={e => setAnnounceDraft(e.target.value)}
-                style={{ flex: 1, border: `1.5px solid ${C.line}`, borderRadius: 4, padding: "10px 14px", fontFamily: FB, fontSize: 14, resize: "vertical", minHeight: 44, background: C.paper, color: C.ink }} />
-              <button onClick={handleSaveAnnounce} disabled={annSending} style={{ background: C.ink, color: C.paper, border: "none", borderRadius: 4, padding: "0 18px", fontWeight: 700, cursor: "pointer", fontFamily: FD }}>{annSending ? "..." : "บันทึก"}</button>
-            </div>
-          )}
+          <div key={announceEditing ? "edit" : "view"} style={{ animation: "staffViewIn .25s ease" }}>
+            {!announceEditing ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, background: C.sageBg, borderRadius: 4, padding: "12px 18px" }}>
+                <span style={{ fontSize: 14 }}>📌</span>
+                <span style={{ fontSize: 14, fontWeight: 500, flex: 1, fontStyle: "italic", color: C.ink }}>{announceText}</span>
+                <button onClick={() => { setAnnounceDraft(announceText); setAnnounceEditing(true); }} style={{ background: "none", border: "none", color: C.sage, fontSize: 12, cursor: "pointer", textDecoration: "underline", fontWeight: 600, fontFamily: FB }}>เขียนประกาศเอง</button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: 8 }}>
+                <textarea value={announceDraft} onChange={e => setAnnounceDraft(e.target.value)}
+                  style={{ flex: 1, border: `1.5px solid ${C.line}`, borderRadius: 4, padding: "10px 14px", fontFamily: FB, fontSize: 14, resize: "vertical", minHeight: 44, background: C.paper, color: C.ink }} />
+                <button onClick={handleSaveAnnounce} disabled={annSending} style={{ background: C.ink, color: C.paper, border: "none", borderRadius: 4, padding: "0 18px", fontWeight: 700, cursor: "pointer", fontFamily: FD }}>{annSending ? "..." : "บันทึก"}</button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Folder tabs */}
         <nav style={{ display: "flex", gap: 4, padding: "24px 26px 0" }}>
-          {[
-            ["order",   "ออเดอร์", pendingCount],
-            ["menu",    "เมนู",   0],
-            ["history", "ประวัติ", 0],
-          ].map(([t, label, count]) => (
-            <button key={t as string} onClick={() => setTab(t as any)}
-              style={{
-                background: tab === t ? C.paper : C.paper2, border: `2px solid ${C.ink}`, borderBottom: tab === t ? `2px solid ${C.paper}` : `2px solid ${C.ink}`,
-                padding: tab === t ? "10px 24px 14px" : "10px 24px 12px", borderRadius: "8px 8px 0 0", cursor: "pointer",
-                fontFamily: FD, fontWeight: 600, fontSize: 15, color: tab === t ? C.ink : C.inkSoft,
-                position: "relative", top: tab === t ? 0 : 2, marginBottom: -2,
-              }}>
-              {label as string}
-              {(count as number) > 0 && <span style={{ background: C.plum, color: C.paper, fontFamily: FM, fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 999, marginLeft: 6 }}>{count as number}</span>}
-            </button>
-          ))}
+          <FolderTab active={tab === "order"} onClick={() => setTab("order")} count={pendingCount}>ออเดอร์</FolderTab>
+          <FolderTab active={tab === "menu"} onClick={() => setTab("menu")} count={0}>เมนู</FolderTab>
+          <FolderTab active={tab === "history"} onClick={() => setTab("history")} count={0}>ประวัติ</FolderTab>
         </nav>
 
         {/* Panel */}
@@ -584,7 +698,7 @@ export default function KitchenPage() {
           {/* ══════ ออเดอร์ ══════ */}
           {tab === "order" && (
             tickets.length === 0 ? (
-              <div style={{ color: C.inkSoft, padding: 14, fontStyle: "italic" }}>ยังไม่มีออเดอร์เข้ามาตอนนี้</div>
+              <EmptyState icon="🧾" title="ยังไม่มีออเดอร์เข้ามาตอนนี้" />
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px,1fr))", gap: 22 }}>
                 {tickets.map(t => {
@@ -610,11 +724,11 @@ export default function KitchenPage() {
                         <div style={{ display: "flex", gap: 8, padding: "14px 18px 18px" }}>
                           {o.status === "new" ? (
                             <>
-                              <button onClick={() => acceptCustom(o.id)} style={{ flex: 1, border: `1.5px solid ${C.sage}`, borderRadius: 3, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD, background: C.sage, color: C.paper }}>รับออเดอร์</button>
-                              <button onClick={() => rejectCustom(o.id)} style={{ flex: 1, border: `1.5px solid ${C.plum}`, borderRadius: 3, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD, background: "transparent", color: C.plum }}>ปฏิเสธ</button>
+                              <ActionButton flex variant="sage" onClick={() => acceptCustom(o.id)}>รับออเดอร์</ActionButton>
+                              <ActionButton flex variant="plum" onClick={() => rejectCustom(o.id)}>ปฏิเสธ</ActionButton>
                             </>
                           ) : (
-                            <button onClick={() => completeCustom(o.id)} style={{ flex: 1, border: "none", borderRadius: 3, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD, background: C.ink, color: C.paper }}>ส่งอาหารแล้ว</button>
+                            <ActionButton flex variant="primary" onClick={() => completeCustom(o.id)}>ส่งอาหารแล้ว</ActionButton>
                           )}
                         </div>
                       </TicketShell>
@@ -659,11 +773,11 @@ export default function KitchenPage() {
                       <div style={{ display: "flex", gap: 8, padding: "14px 18px 18px" }}>
                         {o.status === "new" ? (
                           <>
-                            <button onClick={() => acceptOrder(o.id)} style={{ flex: 1, border: `1.5px solid ${C.sage}`, borderRadius: 3, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD, background: C.sage, color: C.paper }}>รับออเดอร์</button>
-                            <button onClick={() => rejectOrder(o.id)} style={{ flex: 1, border: `1.5px solid ${C.plum}`, borderRadius: 3, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD, background: "transparent", color: C.plum }}>ปฏิเสธ</button>
+                            <ActionButton flex variant="sage" onClick={() => acceptOrder(o.id)}>รับออเดอร์</ActionButton>
+                            <ActionButton flex variant="plum" onClick={() => rejectOrder(o.id)}>ปฏิเสธ</ActionButton>
                           </>
                         ) : (
-                          <button onClick={() => completeOrder(o.id)} style={{ flex: 1, border: "none", borderRadius: 3, padding: "9px 0", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD, background: C.ink, color: C.paper }}>ส่งอาหารแล้ว</button>
+                          <ActionButton flex variant="primary" onClick={() => completeOrder(o.id)}>ส่งอาหารแล้ว</ActionButton>
                         )}
                       </div>
                     </TicketShell>
@@ -679,13 +793,10 @@ export default function KitchenPage() {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, gap: 12, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {CATS.map(c => (
-                    <button key={c} onClick={() => setMenuCat(c)}
-                      style={{ padding: "6px 15px", borderRadius: 3, border: `1.5px solid ${C.ink}`, background: menuCat === c ? C.ink : "transparent", fontSize: 13, color: menuCat === c ? C.paper : C.ink, cursor: "pointer", fontWeight: 500, fontFamily: FD }}>
-                      {c}
-                    </button>
+                    <FilterChip key={c} active={menuCat === c} onClick={() => setMenuCat(c)}>{c}</FilterChip>
                   ))}
                 </div>
-                <button onClick={() => setShowAdd(v => !v)} style={{ background: C.ink, color: C.paper, border: "none", borderRadius: 3, padding: "10px 18px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: FD }}>+ เพิ่มเมนู</button>
+                <ActionButton variant="primary" onClick={() => setShowAdd(v => !v)}>+ เพิ่มเมนู</ActionButton>
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px,1fr))", gap: 16 }}>
@@ -721,17 +832,18 @@ export default function KitchenPage() {
                       <input type="number" min={1} value={newDailyLimit} onChange={e => setNewDailyLimit(e.target.value)} placeholder="จำกัด/วัน (ว่าง=ไม่จำกัด)" style={{ width: 170, background: C.paper, border: `1.5px solid ${C.line}`, borderRadius: 3, padding: "9px 12px", fontSize: 14, fontFamily: FB, color: C.ink }} />
                     </div>
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                      <button onClick={() => setShowAdd(false)} style={{ background: "transparent", border: `1.5px solid ${C.inkSoft}`, color: C.inkSoft, borderRadius: 3, padding: "9px 18px", cursor: "pointer", fontFamily: FD }}>ยกเลิก</button>
-                      <button onClick={handleAddMenu} disabled={adding} style={{ background: C.sage, color: C.paper, border: "none", borderRadius: 3, padding: "9px 18px", fontWeight: 700, cursor: "pointer", fontFamily: FD }}>{adding ? (imgUploading ? "กำลังอัปโหลดรูป..." : "กำลังเพิ่ม...") : "บันทึก"}</button>
+                      <ActionButton variant="ghost" onClick={() => setShowAdd(false)}>ยกเลิก</ActionButton>
+                      <ActionButton variant="sage" disabled={adding} onClick={handleAddMenu}>{adding ? (imgUploading ? "กำลังอัปโหลดรูป..." : "กำลังเพิ่ม...") : "บันทึก"}</ActionButton>
                     </div>
                   </div>
                 )}
 
                 {loadingMenu ? (
-                  <div style={{ color: C.inkSoft, padding: 20 }}>กำลังโหลด...</div>
+                  <SkeletonRows count={4} height={175} />
                 ) : filtered.map(item => (
                   <div key={item.id} style={{ gridColumn: editing === item.id ? "1 / -1" : undefined }}>
-                    <div style={{ background: C.paper2, border: `1px solid ${C.line}`, borderRadius: 3, overflow: "hidden", display: "flex", flexDirection: "column", opacity: item.available ? 1 : 0.45 }}>
+                    <HoverPanel opacity={item.available ? 1 : 0.45}
+                      style={{ background: C.paper2, border: `1px solid ${C.line}`, borderRadius: 3, overflow: "hidden", display: "flex", flexDirection: "column" }}>
                       <div style={{ height: 115, background: C.photoBg, display: "flex", alignItems: "center", justifyContent: "center", color: C.inkSoft, overflow: "hidden" }}>
                         {(item as any).image_url ? <img src={(item as any).image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <IconPhoto />}
                       </div>
@@ -745,12 +857,12 @@ export default function KitchenPage() {
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 14px", borderTop: `1px dashed ${C.line}` }}>
                         <label style={{ position: "relative", width: 36, height: 19, cursor: saving === item.id ? "not-allowed" : "pointer" }}>
                           <input type="checkbox" checked={item.available} disabled={saving === item.id} onChange={() => handleToggle(item)} style={{ display: "none" }} />
-                          <div style={{ position: "absolute", inset: 0, background: item.available ? C.sageBg : C.line, border: `1px solid ${item.available ? C.sage : C.inkSoft}`, borderRadius: 999 }} />
-                          <div style={{ position: "absolute", top: 2, left: item.available ? 19 : 2, width: 15, height: 15, borderRadius: "50%", background: item.available ? C.sage : "#fff", border: `1px solid ${item.available ? C.sage : C.inkSoft}`, transition: "left .15s" }} />
+                          <div style={{ position: "absolute", inset: 0, background: item.available ? C.sageBg : C.line, border: `1px solid ${item.available ? C.sage : C.inkSoft}`, borderRadius: 999, transition: "background-color .15s ease, border-color .15s ease" }} />
+                          <div style={{ position: "absolute", top: 2, left: item.available ? 19 : 2, width: 15, height: 15, borderRadius: "50%", background: item.available ? C.sage : "#fff", border: `1px solid ${item.available ? C.sage : C.inkSoft}`, transition: "left .15s ease" }} />
                         </label>
                         <button onClick={() => openEdit(item)} style={{ width: 25, height: 25, border: `1.5px solid ${C.ink}`, background: C.paper, color: C.ink, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 3, fontSize: 12 }}>✎</button>
                       </div>
-                    </div>
+                    </HoverPanel>
 
                     {editing === item.id && (
                       <div style={{ background: C.paper2, border: `1.5px solid ${C.ink}`, borderRadius: 4, padding: 16, marginTop: 8, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -772,16 +884,16 @@ export default function KitchenPage() {
                           </div>
                         )}
                         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                          <button onClick={() => setDeleteConfirm(item.id)} style={{ background: "transparent", border: `1.5px solid ${C.plum}`, color: C.plum, borderRadius: 3, padding: "9px 14px", cursor: "pointer", fontFamily: FD }}>ลบ</button>
-                          <button onClick={() => setEditing(null)} style={{ background: "transparent", border: `1.5px solid ${C.inkSoft}`, color: C.inkSoft, borderRadius: 3, padding: "9px 18px", cursor: "pointer", fontFamily: FD }}>ยกเลิก</button>
-                          <button onClick={() => handleSave(item)} disabled={saving === item.id} style={{ background: C.sage, color: C.paper, border: "none", borderRadius: 3, padding: "9px 18px", fontWeight: 700, cursor: "pointer", fontFamily: FD }}>{saving === item.id ? (imgUploading ? "กำลังอัปโหลดรูป..." : "กำลังบันทึก...") : "บันทึก"}</button>
+                          <ActionButton variant="plum" onClick={() => setDeleteConfirm(item.id)}>ลบ</ActionButton>
+                          <ActionButton variant="ghost" onClick={() => setEditing(null)}>ยกเลิก</ActionButton>
+                          <ActionButton variant="sage" disabled={saving === item.id} onClick={() => handleSave(item)}>{saving === item.id ? (imgUploading ? "กำลังอัปโหลดรูป..." : "กำลังบันทึก...") : "บันทึก"}</ActionButton>
                         </div>
                         {deleteConfirm === item.id && (
-                          <div style={{ padding: 12, background: C.plumBg, borderRadius: 4 }}>
+                          <div style={{ padding: 12, background: C.plumBg, borderRadius: 4, animation: "staffViewIn .2s ease" }}>
                             <div style={{ fontSize: 13, fontWeight: 600, color: C.plum, marginBottom: 8, fontFamily: FB }}>⚠️ ลบ &quot;{item.name}&quot; ถาวร?</div>
                             <div style={{ display: "flex", gap: 8 }}>
-                              <button onClick={() => handleDeleteMenu(item)} style={{ flex: 1, padding: 8, background: C.plum, color: C.paper, border: "none", borderRadius: 3, fontWeight: 700, cursor: "pointer", fontFamily: FD }}>ยืนยันลบ</button>
-                              <button onClick={() => setDeleteConfirm(null)} style={{ flex: 1, padding: 8, background: C.paper, color: C.inkSoft, border: `1px solid ${C.line}`, borderRadius: 3, cursor: "pointer", fontFamily: FD }}>ไม่ลบ</button>
+                              <ActionButton flex variant="plumSolid" onClick={() => handleDeleteMenu(item)}>ยืนยันลบ</ActionButton>
+                              <ActionButton flex variant="ghost" onClick={() => setDeleteConfirm(null)}>ไม่ลบ</ActionButton>
                             </div>
                           </div>
                         )}
@@ -801,25 +913,24 @@ export default function KitchenPage() {
               <div>
                 <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
                   {[1,7,30].map(d => (
-                    <button key={d} onClick={() => setHdays(d)}
-                      style={{ padding: "6px 15px", borderRadius: 3, border: `1.5px solid ${C.ink}`, background: hdays === d ? C.ink : "transparent", color: hdays === d ? C.paper : C.ink, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: FD }}>
+                    <FilterChip key={d} active={hdays === d} onClick={() => setHdays(d)}>
                       {d === 1 ? "วันนี้" : `${d} วัน`}
-                    </button>
+                    </FilterChip>
                   ))}
                 </div>
                 {history.length === 0 ? (
-                  <div style={{ color: C.inkSoft, padding: 10 }}>ยังไม่มีประวัติ</div>
+                  <EmptyState icon="📜" title="ยังไม่มีประวัติ" />
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column" }}>
                     {history.map(o => (
-                      <div key={o.id} style={{ display: "grid", gridTemplateColumns: "90px 90px 1fr 100px", gap: 14, alignItems: "center", padding: "12px 6px", borderBottom: `1px dashed ${C.line}`, fontSize: 13.5 }}>
+                      <HistoryRow key={o.id}>
                         <span style={{ fontFamily: FM, color: C.inkSoft }}>{fmtDate(o.created_at)}</span>
                         <span style={{ fontFamily: FM, fontWeight: 600, color: C.ink }}>{orderCode(o.id)}</span>
                         <span style={{ color: C.inkSoft, fontSize: 12.5, fontStyle: "italic", textDecoration: isCancelOf(o) ? "line-through" : "none" }}>{o.items.map(it => `${it.name} x${it.qty}`).join(", ")}</span>
                         <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 3, textAlign: "center", fontFamily: FD, background: isDoneOf(o) ? C.sageBg : C.plumBg, color: isDoneOf(o) ? C.sage : C.plum }}>
                           {isDoneOf(o) ? "เสร็จสิ้น" : "ยกเลิก"}
                         </span>
-                      </div>
+                      </HistoryRow>
                     ))}
                   </div>
                 )}
