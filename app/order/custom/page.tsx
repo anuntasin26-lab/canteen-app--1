@@ -17,7 +17,7 @@ export default function CustomOrderPage() {
   const submit = async () => {
     try {
       await handleCustomSubmit();
-      router.push("/order/custom-done");
+      router.push("/order/custom-status");
     } catch {
       // modal แสดงให้แล้ว — อยู่หน้าเดิมให้แก้ไข
     }

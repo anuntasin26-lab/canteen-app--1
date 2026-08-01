@@ -348,6 +348,7 @@ export interface CustomOrder {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  access_token: string;
 }
 
 /** ลูกค้าสั่งอาหารตามสั่ง — ผ่าน RPC (เช็คคำหยาบฝั่ง server) */
@@ -404,6 +405,20 @@ export async function cancelCustomOrder(id: number) {
     .update({ status: "cancelled" })
     .eq("id", id);
   if (error) throw error;
+}
+
+/** ลูกค้ายกเลิกออเดอร์ตามสั่งของตัวเอง — ต้องมี access_token ที่ถูกต้อง (เช็คฝั่ง DB ผ่าน RPC) */
+export async function cancelOwnCustomOrder(customOrderId: number, token: string) {
+  const { data, error } = await supabase.rpc("cancel_own_custom_order", {
+    p_custom_order_id: customOrderId,
+    p_access_token: token,
+  });
+  if (error) {
+    const e: any = new Error(error.message);
+    e.code = error.message?.split(":")[0];
+    throw e;
+  }
+  return data as CustomOrder;
 }
 
 /** Realtime สำหรับ custom_orders */

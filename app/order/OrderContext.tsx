@@ -1,7 +1,7 @@
 "use client";
 // ─── app/order/OrderContext.tsx ───────────────────────────
 // state/logic ที่ใช้ร่วมกันทุกหน้าใน /order/* (name, menu, cart, custom,
-// custom-done, status) — เดิมทั้งหมดนี้อยู่ในไฟล์เดียว ตอนนี้แยก route จริง
+// custom-status, status) — เดิมทั้งหมดนี้อยู่ในไฟล์เดียว ตอนนี้แยก route จริง
 // แต่ยังต้องแชร์ state กัน จึงยกขึ้นมาไว้ที่ Context ระดับ layout
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
@@ -14,13 +14,15 @@ import {
   getTodayAnnouncement,
   subscribeToAnnouncements,
   createCustomOrder,
+  cancelOwnCustomOrder,
   supabase,
 } from "@/lib/supabase";
-import type { MenuItem, Order } from "@/types";
+import type { MenuItem, Order, CustomOrder } from "@/types";
 import { addToCart, subFromCart, cartTotal, cartItemCount, isMenuItemVisible } from "@/lib/cart-utils";
 
-const LS_NAME     = "petpal_name";
-const LS_ORDER_ID = "petpal_order_id";
+const LS_NAME            = "petpal_name";
+const LS_ORDER_ID        = "petpal_order_id";
+const LS_CUSTOM_ORDER_ID = "petpal_custom_order_id";
 
 type ModalState = { message: string; tone?: "error" | "info" } | null;
 
@@ -43,6 +45,8 @@ interface OrderContextValue {
   customItems: string; setCustomItems: (s: string) => void;
   customNote: string; setCustomNote: (s: string) => void;
   customSubmitting: boolean;
+  customOrder: CustomOrder | null;
+  customCancelling: boolean;
   modal: ModalState;
   closeModal: () => void;
   CATS: string[];
@@ -58,6 +62,7 @@ interface OrderContextValue {
   handleCancel: () => Promise<void>;
   handleReorder: () => void;
   handleCustomSubmit: () => Promise<void>;
+  handleCancelCustomOrder: () => Promise<void>;
   refreshMenu: () => void;
 }
 
@@ -76,6 +81,8 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   const [customItems,  setCustomItems]  = useState("");
   const [customNote,   setCustomNote]   = useState("");
   const [customSubmitting, setCustomSubmitting] = useState(false);
+  const [customOrder,      setCustomOrder]      = useState<CustomOrder | null>(null);
+  const [customCancelling, setCustomCancelling] = useState(false);
   const [name,        setName]        = useState("");
   const [cart,        setCart]        = useState<Record<number, number>>({});
   const [note,        setNote]        = useState("");
@@ -97,8 +104,14 @@ export function OrderProvider({ children }: { children: ReactNode }) {
 
   // ── โหลดเมนู + ตรวจ localStorage (ชื่อ/ออเดอร์ค้าง) ──────
   useEffect(() => {
-    const savedName    = localStorage.getItem(LS_NAME) ?? "";
-    const savedOrderId = localStorage.getItem(LS_ORDER_ID);
+    const savedName          = localStorage.getItem(LS_NAME) ?? "";
+    const savedOrderId       = localStorage.getItem(LS_ORDER_ID);
+    const savedCustomOrderId = localStorage.getItem(LS_CUSTOM_ORDER_ID);
+    const isSameDay = (iso: string) => {
+      const d = new Date(iso);
+      const today = new Date();
+      return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+    };
 
     getMenuItems()
       .then(async (m) => {
@@ -109,23 +122,27 @@ export function OrderProvider({ children }: { children: ReactNode }) {
           try {
             const { data, error: oErr } = await supabase
               .from("orders_with_items").select("*").eq("id", Number(savedOrderId)).single();
-            if (!oErr && data) {
-              const orderDate = new Date(data.created_at);
-              const today = new Date();
-              const sameDay =
-                orderDate.getFullYear() === today.getFullYear() &&
-                orderDate.getMonth()    === today.getMonth()    &&
-                orderDate.getDate()     === today.getDate();
-              if (sameDay && data.status !== "cancelled") {
-                setOrder(data);
-              } else {
-                localStorage.removeItem(LS_ORDER_ID);
-              }
+            if (!oErr && data && isSameDay(data.created_at) && data.status !== "cancelled") {
+              setOrder(data);
             } else {
               localStorage.removeItem(LS_ORDER_ID);
             }
           } catch {
             localStorage.removeItem(LS_ORDER_ID);
+          }
+        }
+
+        if (savedCustomOrderId) {
+          try {
+            const { data, error: cErr } = await supabase
+              .from("custom_orders").select("*").eq("id", Number(savedCustomOrderId)).single();
+            if (!cErr && data && isSameDay(data.created_at) && data.status !== "cancelled") {
+              setCustomOrder(data);
+            } else {
+              localStorage.removeItem(LS_CUSTOM_ORDER_ID);
+            }
+          } catch {
+            localStorage.removeItem(LS_CUSTOM_ORDER_ID);
           }
         }
       })
@@ -170,6 +187,21 @@ export function OrderProvider({ children }: { children: ReactNode }) {
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [order?.id]);
+
+  // ── realtime ติดตาม custom order ────────────────────────
+  useEffect(() => {
+    if (!customOrder) return;
+    const ch = supabase
+      .channel(`custom-order-${customOrder.id}`)
+      .on("postgres_changes", {
+        event: "UPDATE", schema: "public", table: "custom_orders",
+        filter: `id=eq.${customOrder.id}`,
+      }, (payload) => {
+        setCustomOrder((prev) => prev ? { ...prev, ...payload.new } : prev);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [customOrder?.id]);
 
   const CATS = ["ทั้งหมด", ...Array.from(new Set(menuItems.map((m) => m.category)))];
   const visibleItems = menuItems.filter(isMenuItemVisible);
@@ -279,11 +311,13 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     if (!customItems.trim() || !name.trim()) return;
     setCustomSubmitting(true);
     try {
-      await createCustomOrder({
+      const newCustomOrder = await createCustomOrder({
         customer_name: name.trim(),
         items: customItems.trim(),
         note: customNote.trim() || undefined,
       });
+      localStorage.setItem(LS_CUSTOM_ORDER_ID, String(newCustomOrder.id));
+      setCustomOrder(newCustomOrder);
       setCustomItems("");
       setCustomNote("");
     } catch (err: any) {
@@ -300,16 +334,34 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const handleCancelCustomOrder = async () => {
+    if (!customOrder) return;
+    const confirmed = window.confirm("ยืนยันยกเลิกรายการนี้?");
+    if (!confirmed) return;
+    setCustomCancelling(true);
+    try {
+      await cancelOwnCustomOrder(customOrder.id, customOrder.access_token);
+      localStorage.removeItem(LS_CUSTOM_ORDER_ID);
+      setCustomOrder(null);
+    } catch {
+      showModal("ยกเลิกไม่ได้ กรุณาลองใหม่");
+    } finally {
+      setCustomCancelling(false);
+    }
+  };
+
   const value: OrderContextValue = {
     menuItems, loading, error,
     name, setName, cart, note, setNote, cat, setCat, order, submitting,
     announcement, showBanner, setShowBanner,
     editingName, setEditingName, newName, setNewName, savingName, cancelling,
     customItems, setCustomItems, customNote, setCustomNote, customSubmitting,
+    customOrder, customCancelling,
     modal, closeModal,
     CATS, filtered, cartItems, total, itemCount,
     add, sub: subFn,
     handleGoMenu, handleConfirm, handleSaveName, handleCancel, handleReorder, handleCustomSubmit,
+    handleCancelCustomOrder,
     refreshMenu,
   };
 

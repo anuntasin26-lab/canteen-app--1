@@ -36,6 +36,18 @@ export interface Order {
   access_token: string;
 }
 
+export interface CustomOrder {
+  id: number;
+  customer_name: string;
+  items: string;
+  note: string | null;
+  status: OrderStatus;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  access_token: string;
+}
+
 export interface Announcement {
   id: number;
   message: string;
