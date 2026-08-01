@@ -31,6 +31,7 @@ export default function MenuHistoryPage() {
     try {
       await signInStaff(email.trim(), password);
       setUnlocked(true);
+      setLoading(true);
     } catch {
       setLoginError(true);
     } finally {
@@ -46,7 +47,6 @@ export default function MenuHistoryPage() {
 
   useEffect(() => {
     if (!unlocked) return;
-    setLoading(true);
     getMenuHistory(days).then(setLogs).finally(() => setLoading(false));
   }, [unlocked, days]);
 
@@ -100,7 +100,7 @@ export default function MenuHistoryPage() {
 
       <div style={{ display: "flex", gap: 6, padding: "12px 16px" }}>
         {[3, 7, 30].map(d => (
-          <button key={d} onClick={() => setDays(d)}
+          <button key={d} onClick={() => { if (days !== d) setLoading(true); setDays(d); }}
             style={{ flex: 1, padding: "7px 0", border: `1px solid ${days === d ? C.green : C.border}`, borderRadius: 10, background: days === d ? C.greenL : "#fff", color: days === d ? C.green : C.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
             {d} วัน
           </button>

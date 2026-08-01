@@ -1,7 +1,7 @@
 "use client";
 // ─── app/order/cart/page.tsx ──────────────────────────────
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useOrder } from "../OrderContext";
 import { S } from "../styles";
@@ -9,18 +9,24 @@ import { S } from "../styles";
 export default function CartPage() {
   const router = useRouter();
   const { loading, name, cartItems, cart, add, sub, note, setNote, total, submitting, handleConfirm } = useOrder();
+  // handleConfirm() เคลียร์ตะกร้าทันทีที่สั่งสำเร็จ (setCart({})) ก่อน navigate ไป
+  // /order/status — ถ้าไม่กันไว้ guard ด้านล่างจะเห็นตะกร้าว่างแล้ว replace ไป
+  // /order/menu แข่งกับ push("/order/status") จนชนะ ทำให้เด้งกลับเมนูเสมอ
+  const confirmingRef = useRef(false);
 
   useEffect(() => {
     if (loading) return;
     if (!name) { router.replace("/order/name"); return; }
-    if (cartItems.length === 0) router.replace("/order/menu");
+    if (cartItems.length === 0 && !confirmingRef.current) router.replace("/order/menu");
   }, [loading, name, cartItems.length, router]);
 
   const confirm = async () => {
+    confirmingRef.current = true;
     try {
       await handleConfirm();
       router.push("/order/status");
     } catch {
+      confirmingRef.current = false;
       // handleConfirm แสดง modal ให้แล้ว — อยู่หน้าเดิมให้แก้ไข ไม่ navigate ต่อ
     }
   };
