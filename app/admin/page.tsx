@@ -5,11 +5,14 @@
 
 import { useEffect, useState } from "react";
 import {
-  signInStaff, signOutStaff,
   getBlacklistWords, addBlacklistWord, removeBlacklistWord,
   getFlaggedNames, resolveFlaggedName,
   getAuditLog,
 } from "@/lib/supabase";
+import { useStaffAuth } from "@/lib/useStaffAuth";
+import { StaffLoginScreen, type StaffLoginTheme } from "@/components/StaffLoginScreen";
+import { StaffButton, type StaffButtonTheme } from "@/components/StaffButton";
+import { StaffTextInput, type StaffTextInputTheme } from "@/components/StaffTextInput";
 
 const C = {
   green: "#3B6B0F", greenL: "#EBF3DC",
@@ -17,12 +20,112 @@ const C = {
   text: "#1C1A17", muted: "#7A7570", border: "#E2DDD6", bg: "#F5F3EE",
 };
 
+const adminLoginTheme: StaffLoginTheme = {
+  ink: C.text, inkSoft: C.muted, panel: "#fff", accent: C.green,
+  danger: C.red, border: C.border, bg: C.bg,
+  fontHeading: "inherit", fontBody: "inherit", radius: 14,
+  title: "Admin — PETPAL", subtitle: "เข้าสู่ระบบเพื่อใช้งาน", brandGlyph: "⚙️",
+};
+
+const dashboardTheme: StaffButtonTheme & StaffTextInputTheme = {
+  ink: C.text, inkSoft: C.muted, panel: "#fff", accent: C.green,
+  danger: C.red, border: C.border, fontHeading: "inherit", fontBody: "inherit", radius: 14,
+};
+
+// ── ปุ่มออกจากระบบ — มี hover feedback ─────────────────────
+function LogoutButton({ onClick }: { onClick: () => void }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button onClick={onClick}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        padding: "5px 10px", background: hover ? "#FADBD8" : C.redL, border: "1px solid #F5B4AE",
+        borderRadius: 20, fontSize: 11, fontWeight: 600, color: C.red, cursor: "pointer",
+        fontFamily: "inherit", transition: "background-color .15s ease",
+      }}>
+      🔒 ออกจากระบบ
+    </button>
+  );
+}
+
+// ── แท็บ — มี hover + transition ────────────────────────────
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button onClick={onClick}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        flex: 1, padding: "8px 0", border: `1px solid ${active ? C.green : C.border}`, borderRadius: 10,
+        background: active ? C.greenL : hover ? "#FAFAF7" : "#fff",
+        color: active ? C.green : C.muted, fontSize: 13, fontWeight: 600, cursor: "pointer",
+        fontFamily: "inherit", transition: "background-color .15s ease, border-color .15s ease",
+      }}>
+      {children}
+    </button>
+  );
+}
+
+// ── การ์ดยกตัวเบา ๆ เมื่อ hover ────────────────────────────
+function HoverCard({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        transition: "box-shadow .15s ease, transform .1s ease",
+        boxShadow: hover ? "0 4px 10px rgba(0,0,0,0.08)" : "0 1px 2px rgba(0,0,0,0.04)",
+        ...style,
+      }}>
+      {children}
+    </div>
+  );
+}
+
+// ── แถวคำต้องห้าม — ปุ่มลบจะเด่นขึ้นตอน hover ───────────────
+function BlacklistRow({ word, onRemove }: { word: { id: number; word: string }; onRemove: () => void }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff",
+        border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", marginBottom: 6,
+        boxShadow: hover ? "0 4px 10px rgba(0,0,0,0.08)" : "0 1px 2px rgba(0,0,0,0.04)",
+        transition: "box-shadow .15s ease",
+      }}>
+      <span style={{ fontSize: 13, color: C.text, fontFamily: "monospace" }}>{word.word}</span>
+      <button onClick={onRemove}
+        style={{ border: "none", background: "transparent", color: C.red, cursor: "pointer", fontSize: 12, opacity: hover ? 1 : 0.45, transition: "opacity .15s ease" }}>
+        ลบ
+      </button>
+    </div>
+  );
+}
+
+// ── โครง loading แบบ skeleton pulse ────────────────────────
+function SkeletonRows({ count = 3 }: { count?: number }) {
+  return (
+    <div>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} style={{
+          height: 44, borderRadius: 8, background: C.border, opacity: 0.5, marginBottom: 6,
+          animation: "staffPulse 1.4s ease-in-out infinite", animationDelay: `${i * 0.12}s`,
+        }} />
+      ))}
+    </div>
+  );
+}
+
+// ── สถานะว่าง — ไอคอน + หัวข้อ + คำอธิบาย ───────────────────
+function EmptyState({ icon, title }: { icon: string; title: string }) {
+  return (
+    <div style={{ textAlign: "center", padding: "40px 16px", color: C.muted }}>
+      <div style={{ fontSize: 28, marginBottom: 8 }}>{icon}</div>
+      <div style={{ fontSize: 13 }}>{title}</div>
+    </div>
+  );
+}
+
 export default function AdminPage() {
-  const [email,      setEmail]      = useState("");
-  const [password,   setPassword]   = useState("");
-  const [unlocked,   setUnlocked]   = useState(false);
-  const [loginError, setLoginError] = useState(false);
-  const [loggingIn,  setLoggingIn]  = useState(false);
+  const auth = useStaffAuth();
   const [tab, setTab] = useState<"dashboard" | "settings">("dashboard");
   const [blacklist, setBlacklist] = useState<{ id: number; word: string; created_at: string }[]>([]);
   const [flagged, setFlagged] = useState<{ id: number; order_id: number | null; flagged_text: string; created_at: string }[]>([]);
@@ -38,16 +141,16 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    if (!unlocked || tab !== "dashboard") return;
+    if (!auth.unlocked || tab !== "dashboard") return;
     getAuditLog(50).then(setAuditLog).finally(() => setLoadingAudit(false));
-  }, [unlocked, tab]);
+  }, [auth.unlocked, tab]);
 
   useEffect(() => {
-    if (!unlocked || tab !== "settings") return;
+    if (!auth.unlocked || tab !== "settings") return;
     Promise.all([getBlacklistWords(), getFlaggedNames()])
       .then(([b, f]) => { setBlacklist(b); setFlagged(f); })
       .finally(() => setLoadingSettings(false));
-  }, [unlocked, tab]);
+  }, [auth.unlocked, tab]);
 
   const handleAddWord = async () => {
     if (!newWord.trim()) return;
@@ -79,70 +182,20 @@ export default function AdminPage() {
     }
   };
 
-  const handleLogin = async () => {
-    if (!email.trim() || !password) return;
-    setLoggingIn(true);
-    setLoginError(false);
-    try {
-      await signInStaff(email.trim(), password);
-      setUnlocked(true);
-      setLoadingForTab(tab);
-    } catch {
-      setLoginError(true);
-    } finally {
-      setLoggingIn(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    await signOutStaff();
-    setUnlocked(false);
-    setEmail(""); setPassword("");
-  };
-
-  if (!unlocked) return (
-    <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: C.bg, fontFamily: "Sarabun, sans-serif", padding: 24 }}>
-      <div style={{ fontSize: 48, marginBottom: 12 }}>⚙️</div>
-      <div style={{ fontSize: 20, fontWeight: 700, color: C.text, marginBottom: 4 }}>Admin — PETPAL</div>
-      <div style={{ fontSize: 13, color: C.muted, marginBottom: 28 }}>เข้าสู่ระบบเพื่อใช้งาน</div>
-      <form
-        onSubmit={(e) => { e.preventDefault(); handleLogin(); }}
-        style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 280, width: "100%" }}
-      >
-        <input
-          type="email" autoComplete="username" placeholder="อีเมล" value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ padding: "13px 14px", border: `1px solid ${C.border}`, borderRadius: 10, fontSize: 16, fontFamily: "Sarabun, sans-serif", background: "#fff", color: C.text }}
-        />
-        <input
-          type="password" autoComplete="current-password" placeholder="รหัสผ่าน" value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          style={{ padding: "13px 14px", border: `1px solid ${C.border}`, borderRadius: 10, fontSize: 16, fontFamily: "Sarabun, sans-serif", background: "#fff", color: C.text }}
-        />
-        <button
-          type="submit" disabled={loggingIn || !email.trim() || !password}
-          style={{ padding: "13px 0", border: "none", borderRadius: 10, background: C.green, color: "#fff", fontSize: 15, fontWeight: 600, fontFamily: "Sarabun, sans-serif", cursor: loggingIn ? "default" : "pointer", opacity: loggingIn ? 0.6 : 1 }}
-        >
-          {loggingIn ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
-        </button>
-      </form>
-      {loginError && <div style={{ color: C.red, fontSize: 13, marginTop: 16, fontWeight: 600 }}>อีเมลหรือรหัสผ่านไม่ถูกต้อง</div>}
-    </div>
-  );
+  if (!auth.unlocked) return <StaffLoginScreen auth={auth} theme={adminLoginTheme} />;
 
   return (
-    <div style={{ minHeight: "100dvh", background: C.bg, fontFamily: "Sarabun, sans-serif" }}>
+    <div style={{ minHeight: "100dvh", background: C.bg, fontFamily: "inherit" }}>
+      <style>{`@keyframes staffPulse { 0%, 100% { opacity: .5; } 50% { opacity: .2; } }`}</style>
+
       <div style={{ padding: "14px 16px 10px", borderBottom: `1px solid ${C.border}`, background: "#fff", position: "sticky", top: 0, zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>⚙️ Admin</div>
-        <button onClick={handleLogout} style={{ padding: "5px 10px", background: C.redL, border: "1px solid #F5B4AE", borderRadius: 20, fontSize: 11, fontWeight: 600, color: C.red, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>🔒 ออกจากระบบ</button>
+        <LogoutButton onClick={auth.handleLogout} />
       </div>
 
       <div style={{ display: "flex", gap: 6, padding: "12px 16px" }}>
         {([["dashboard", "แดชบอร์ด"], ["settings", "ตั้งค่า"]] as const).map(([key, label]) => (
-          <button key={key} onClick={() => { if (tab !== key) setLoadingForTab(key); setTab(key); }}
-            style={{ flex: 1, padding: "8px 0", border: `1px solid ${tab === key ? C.green : C.border}`, borderRadius: 10, background: tab === key ? C.greenL : "#fff", color: tab === key ? C.green : C.muted, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
-            {label}
-          </button>
+          <TabButton key={key} active={tab === key} onClick={() => { if (tab !== key) setLoadingForTab(key); setTab(key); }}>{label}</TabButton>
         ))}
       </div>
 
@@ -153,71 +206,69 @@ export default function AdminPage() {
             การเปลี่ยนสถานะ/แก้ชื่อ/ลบออเดอร์ล่าสุด — ยอดขายรวม/รายงานเต็มรูปแบบจะเพิ่มทีหลัง
           </div>
           {loadingAudit ? (
-            <div style={{ textAlign: "center", padding: 24, color: C.muted, fontSize: 13 }}>กำลังโหลด...</div>
+            <SkeletonRows />
           ) : auditLog.length === 0 ? (
-            <div style={{ textAlign: "center", padding: 24, color: C.muted, fontSize: 12 }}>ยังไม่มีการเปลี่ยนแปลง</div>
+            <EmptyState icon="🗒️" title="ยังไม่มีการเปลี่ยนแปลง" />
           ) : auditLog.map((a) => (
-            <div key={a.id} style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", marginBottom: 6, fontSize: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-                <span style={{ fontWeight: 600, color: C.text }}>
-                  {a.action === "status_change" ? "เปลี่ยนสถานะ" : a.action === "rename" ? "แก้ชื่อ" : "ลบ"} — {a.target_type} #{a.target_id}
+            <HoverCard key={a.id} style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 12px", marginBottom: 6, fontSize: 12 }}>
+              <div style={{ fontWeight: 600, color: C.text, marginBottom: 3 }}>
+                {a.action === "status_change" ? "เปลี่ยนสถานะ" : a.action === "rename" ? "แก้ชื่อ" : "ลบ"} — {a.target_type} #{a.target_id}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", color: C.muted, fontSize: 11 }}>
+                <span>
+                  {a.actor_id ? "โดย staff" : "โดยลูกค้า"}
+                  {a.detail?.from !== undefined && ` — ${JSON.stringify(a.detail.from)} → ${JSON.stringify(a.detail.to)}`}
                 </span>
-                <span style={{ color: C.muted }}>{new Date(a.created_at).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                <span>{new Date(a.created_at).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
               </div>
-              <div style={{ color: C.muted }}>
-                {a.actor_id ? "โดย staff" : "โดยลูกค้า"}
-                {a.detail?.from !== undefined && ` — ${JSON.stringify(a.detail.from)} → ${JSON.stringify(a.detail.to)}`}
-              </div>
-            </div>
+            </HoverCard>
           ))}
         </div>
       ) : (
         <div style={{ padding: "16px" }}>
           {loadingSettings ? (
-            <div style={{ textAlign: "center", padding: 24, color: C.muted, fontSize: 13 }}>กำลังโหลด...</div>
+            <SkeletonRows />
           ) : (
             <>
               {flagged.length > 0 && (
                 <div style={{ marginBottom: 24 }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 8 }}>🚩 ชื่อที่ถูกรายงาน ({flagged.length})</div>
                   {flagged.map((f) => (
-                    <div key={f.id} style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                    <HoverCard key={f.id} style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 8 }}>&quot;{f.flagged_text}&quot;</div>
                       <div style={{ display: "flex", gap: 6 }}>
-                        <button onClick={() => handleResolveFlag(f.id, true, f.flagged_text)}
-                          style={{ flex: 1, padding: "6px 0", border: "none", borderRadius: 8, background: C.red, color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
+                        <StaffButton variant="danger" theme={dashboardTheme} style={{ flex: 1, padding: "6px 0", fontSize: 12 }}
+                          onClick={() => handleResolveFlag(f.id, true, f.flagged_text)}>
                           เพิ่มเข้า blacklist
-                        </button>
-                        <button onClick={() => handleResolveFlag(f.id, false)}
-                          style={{ flex: 1, padding: "6px 0", border: `1px solid ${C.border}`, borderRadius: 8, background: "#fff", color: C.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>
+                        </StaffButton>
+                        <StaffButton variant="secondary" theme={dashboardTheme} style={{ flex: 1, padding: "6px 0", fontSize: 12 }}
+                          onClick={() => handleResolveFlag(f.id, false)}>
                           ไม่ใช่คำหยาบ (ปิดเรื่อง)
-                        </button>
+                        </StaffButton>
                       </div>
-                    </div>
+                    </HoverCard>
                   ))}
                 </div>
               )}
 
               <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 8 }}>รายการคำต้องห้าม ({blacklist.length})</div>
-              <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-                <input
-                  value={newWord} onChange={(e) => setNewWord(e.target.value)}
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <StaffTextInput
+                  value={newWord} onChange={setNewWord} placeholder="เพิ่มคำใหม่..." theme={dashboardTheme}
                   onKeyDown={(e) => { if (e.key === "Enter") handleAddWord(); }}
-                  placeholder="เพิ่มคำใหม่..."
-                  style={{ flex: 1, padding: "9px 12px", border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 14, fontFamily: "Sarabun, sans-serif" }}
+                  style={{ padding: "9px 12px", fontSize: 14 }}
                 />
-                <button onClick={handleAddWord} style={{ padding: "9px 16px", border: "none", borderRadius: 8, background: C.green, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "Sarabun, sans-serif" }}>เพิ่ม</button>
+                <StaffButton variant="primary" theme={dashboardTheme} style={{ padding: "0 18px", fontSize: 13 }} onClick={handleAddWord}>
+                  เพิ่ม
+                </StaffButton>
               </div>
               <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>
                 ระบบจะ normalize คำอัตโนมัติ (ตัดช่องว่าง/ตัวอักษรซ้ำ/homoglyph) ก่อนเทียบเสมอ ไม่ต้องพิมพ์หลายรูปแบบ
               </div>
               {blacklist.map((w) => (
-                <div key={w.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff", border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", marginBottom: 6 }}>
-                  <span style={{ fontSize: 13, color: C.text, fontFamily: "monospace" }}>{w.word}</span>
-                  <button onClick={() => handleRemoveWord(w.id)} style={{ border: "none", background: "transparent", color: C.red, cursor: "pointer", fontSize: 12 }}>ลบ</button>
-                </div>
+                <BlacklistRow key={w.id} word={w} onRemove={() => handleRemoveWord(w.id)} />
               ))}
-              {blacklist.length === 0 && <div style={{ textAlign: "center", padding: 16, color: C.muted, fontSize: 12 }}>ยังไม่มีคำในรายการ</div>}
+              {blacklist.length === 0 && <EmptyState icon="📋" title="ยังไม่มีคำในรายการ" />}
             </>
           )}
         </div>

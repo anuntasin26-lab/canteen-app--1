@@ -18,14 +18,14 @@ import {
   getTodayCustomOrders, updateCustomOrderStatus, cancelCustomOrder,
   subscribeToCustomOrders,
   uploadMenuImage, deleteMenuImage,
-  signInStaff, signOutStaff,
   flagOrderName,
 } from "@/lib/supabase";
 import type { CustomOrder } from "@/lib/supabase";
 import type { Order } from "@/types";
 import type { MenuItem } from "@/types";
-import { C, FB, DEFAULT_CATS } from "./shared";
-import { LoginScreen } from "./components/LoginScreen";
+import { useStaffAuth } from "@/lib/useStaffAuth";
+import { StaffLoginScreen, type StaffLoginTheme } from "@/components/StaffLoginScreen";
+import { C, FD, FB, FM, DEFAULT_CATS } from "./shared";
 import { KitchenHeader } from "./components/KitchenHeader";
 import { AnnouncementBar } from "./components/AnnouncementBar";
 import { KitchenTabs, type KitchenTab } from "./components/KitchenTabs";
@@ -33,13 +33,20 @@ import { OrdersPanel, type Ticket } from "./components/OrdersPanel";
 import { MenuPanel } from "./components/MenuPanel";
 import { HistoryPanel } from "./components/HistoryPanel";
 
+const KITCHEN_FONTS_HREF =
+  "https://fonts.googleapis.com/css2?family=Taviraj:wght@500;600;700&family=Noto+Sans+Thai:wght@400;500;600&family=Courier+Prime:wght@400;700&display=swap";
+
+const kitchenLoginTheme: StaffLoginTheme = {
+  ink: C.ink, inkSoft: C.inkSoft, panel: C.paper, accent: C.sage, danger: C.plum,
+  border: C.line, bg: C.bg,
+  fontHeading: FD, fontBody: FB, fontMono: FM, radius: 16,
+  title: "ครัว PETPAL", subtitle: "เข้าสู่ระบบเพื่อใช้งาน", brandGlyph: "PP",
+  googleFontsHref: KITCHEN_FONTS_HREF,
+};
+
 export default function KitchenPage() {
   // ── Auth ──────────────────────────────────────────────
-  const [email,      setEmail]      = useState("");
-  const [password,   setPassword]   = useState("");
-  const [unlocked,   setUnlocked]   = useState(false);
-  const [loginError, setLoginError] = useState(false);
-  const [loggingIn,  setLoggingIn]  = useState(false);
+  const auth = useStaffAuth();
 
   // ── Clock ─────────────────────────────────────────────
   const [now, setNow] = useState(new Date());
@@ -100,25 +107,9 @@ export default function KitchenPage() {
   const [adding,     setAdding]     = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
-  // ── Login handler (Supabase Auth) ──────────────────────
-  const handleLogin = async () => {
-    if (!email.trim() || !password) return;
-    setLoggingIn(true);
-    setLoginError(false);
-    try {
-      await signInStaff(email.trim(), password);
-      setUnlocked(true);
-    } catch {
-      setLoginError(true);
-    } finally {
-      setLoggingIn(false);
-    }
-  };
   const handleLock = async () => {
     if (!window.confirm("ออกจากระบบและกลับไปหน้า login?")) return;
-    await signOutStaff();
-    setUnlocked(false);
-    setEmail(""); setPassword("");
+    await auth.handleLogout();
   };
 
   // ── Flag ชื่อที่หลุดผ่าน blacklist มาได้ — เข้าคิว /admin ตรวจสอบ ──
@@ -151,7 +142,7 @@ export default function KitchenPage() {
 
   // ── Load orders ───────────────────────────────────────
   useEffect(() => {
-    if (!unlocked) return;
+    if (!auth.unlocked) return;
     getTodayOrders().then(d => {
       const cleared = (() => {
         try {
@@ -161,16 +152,16 @@ export default function KitchenPage() {
       })();
       setOrders((d as Order[]).filter(o => !cleared.has(o.id)));
     });
-  }, [unlocked]);
+  }, [auth.unlocked]);
 
   useEffect(() => {
-    if (!unlocked || tab !== "history") return;
+    if (!auth.unlocked || tab !== "history") return;
     getOrderHistory(hdays).then(d => setHistory(d as Order[]));
-  }, [unlocked, tab, hdays]);
+  }, [auth.unlocked, tab, hdays]);
 
   // ── Realtime orders ───────────────────────────────────
   useEffect(() => {
-    if (!unlocked) return;
+    if (!auth.unlocked) return;
     const ch = subscribeToOrders((payload) => {
       if (payload.eventType === "INSERT") {
         supabase.from("orders_with_items").select("*").eq("id", payload.new.id).single()
@@ -184,11 +175,11 @@ export default function KitchenPage() {
         setOrders(p => p.filter(o => o.id !== payload.old.id));
     });
     return () => { supabase.removeChannel(ch); };
-  }, [unlocked]);
+  }, [auth.unlocked]);
 
   // ── Load custom orders ───────────────────────────────
   useEffect(() => {
-    if (!unlocked) return;
+    if (!auth.unlocked) return;
     getTodayCustomOrders().then(d => {
       const cleared = (() => {
         try {
@@ -198,10 +189,10 @@ export default function KitchenPage() {
       })();
       setCustomOrders(d.filter(o => !cleared.has(-o.id)));
     });
-  }, [unlocked]);
+  }, [auth.unlocked]);
 
   useEffect(() => {
-    if (!unlocked) return;
+    if (!auth.unlocked) return;
     const ch = subscribeToCustomOrders((payload) => {
       if (payload.eventType === "INSERT") {
         setCustomOrders(p => [payload.new as CustomOrder, ...p]);
@@ -213,22 +204,22 @@ export default function KitchenPage() {
         setCustomOrders(p => p.filter(o => o.id !== payload.old.id));
     });
     return () => { supabase.removeChannel(ch); };
-  }, [unlocked]);
+  }, [auth.unlocked]);
 
   // ── Load menu ─────────────────────────────────────────
   useEffect(() => {
-    if (!unlocked) return;
+    if (!auth.unlocked) return;
     getMenuItems().then(d => setItems(d as MenuItem[])).finally(() => setLoadingMenu(false));
-  }, [unlocked]);
+  }, [auth.unlocked]);
 
   useEffect(() => {
-    if (!unlocked) return;
+    if (!auth.unlocked) return;
     const ch = subscribeToMenuItems((payload) => {
       if (payload.eventType === "UPDATE")
         setItems(p => p.map(m => m.id === payload.new.id ? { ...m, ...payload.new } : m));
     });
     return () => { supabase.removeChannel(ch); };
-  }, [unlocked]);
+  }, [auth.unlocked]);
 
   // ── Order handlers (ปกติ) ─────────────────────────────
   const acceptOrder = async (id: number) => {
@@ -412,14 +403,7 @@ export default function KitchenPage() {
   const clockLabel = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
   // ── LOGIN SCREEN ──────────────────────────────────────
-  if (!unlocked) return (
-    <LoginScreen
-      email={email} setEmail={setEmail}
-      password={password} setPassword={setPassword}
-      loginError={loginError} loggingIn={loggingIn}
-      onSubmit={handleLogin}
-    />
-  );
+  if (!auth.unlocked) return <StaffLoginScreen auth={auth} theme={kitchenLoginTheme} />;
 
   // ── MAIN ──────────────────────────────────────────────
   return (
